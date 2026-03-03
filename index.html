@@ -6280,7 +6280,7 @@ CREATE POLICY "Allow read"   ON logs FOR SELECT USING (true);</code>
             await yieldToUI();
 
             const existingSet = new Set(
-                certificates.map(c => `${c.propertyAddress?.toLowerCase()}|${c.certificateType?.toLowerCase()}|${c.expiryDate}`)
+                certificates.map(c => `${(c.propertyAddress||'').trim().toLowerCase()}|${(c.certificateType||'').trim().toLowerCase()}`)
             );
             // Intra-CSV duplicate detection (addresses within same file)
             const intraFileSet = new Set();
@@ -6322,7 +6322,8 @@ CREATE POLICY "Allow read"   ON logs FOR SELECT USING (true);</code>
                 }
 
                 // Intra-CSV duplicate check (same file, same address+type+expiry)
-                const intraKey = `${addr.toLowerCase()}|${type.toLowerCase()}|${fmtExp || 'noexp'}`;
+                // Intra-file dup: address + type only (expiry may differ on re-exports)
+                const intraKey = `${addr.toLowerCase()}|${type.toLowerCase()}`;
                 if (intraFileSet.has(intraKey)) {
                     skipped++;
                     skipReasons.intraFileDup.push(`Row ${i+1}: "${addr} (${type})" — duplicate within this CSV file`);
@@ -6331,10 +6332,10 @@ CREATE POLICY "Allow read"   ON logs FOR SELECT USING (true);</code>
                 }
                 intraFileSet.add(intraKey);
 
-                // Existing database duplicate check
-                const dupKey = isIncomplete
-                    ? `${addr.toLowerCase()}|${type.toLowerCase()}|NOEXP`
-                    : `${addr.toLowerCase()}|${type.toLowerCase()}|${fmtExp}`;
+                // Existing database duplicate check: address + type only
+                // We do NOT include expiry in the key — same address+type = always a duplicate
+                // regardless of whether the date changed (prevents re-import bloat)
+                const dupKey = `${addr.toLowerCase()}|${type.toLowerCase()}`;
 
                 if (existingSet.has(dupKey)) {
                     skipped++;

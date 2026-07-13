@@ -1279,7 +1279,6 @@
         .fade-transition { transition: opacity 0.3s ease, transform 0.3s ease; }
 
     </style>
-<base target="_blank">
 </head>
 <body>
 
@@ -2109,6 +2108,45 @@
                 <div style="font-size:0.75rem;color:#94a3b8;margin-top:10px;"><i class="fas fa-info-circle" style="margin-right:4px;"></i>Without this, reminders are tracked in memory only (resets on page refresh). Cert saves work fine without it.</div>
             </div>
 
+            <!-- ═══ ADMIN ACCESS MANAGEMENT ═══ -->
+            <div style="background:white; border-radius:16px; border:1px solid #e2e8f0; padding:28px; margin-bottom:20px; box-shadow:0 2px 4px rgba(0,0,0,0.02);">
+                <div style="display:flex; align-items:center; gap:14px; margin-bottom:20px; padding-bottom:18px; border-bottom:1px solid #f1f5f9; flex-wrap:wrap;">
+                    <div style="width:44px; height:44px; background:#eef2ff; border-radius:10px; display:flex; align-items:center; justify-content:center; font-size:1.3rem;">🛡️</div>
+                    <div>
+                        <div style="font-weight:800; color:#0f172a; font-size:1rem;">Admin Access</div>
+                        <div style="font-size:0.8rem; color:#94a3b8; margin-top:2px;">Give another account admin rights (Audit Log + Settings). They must already have a sign-in login for this app.</div>
+                    </div>
+                    <div style="margin-left:auto;font-size:0.7rem;color:#94a3b8;font-weight:600;" id="appBuildTag"></div>
+                </div>
+                <div id="adminSetupHelp" style="display:none; background:#fffbeb; border:1px solid #fde68a; border-radius:10px; padding:14px 18px; margin-bottom:16px; font-size:0.82rem; color:#92400e;">
+                    <strong><i class="fas fa-database"></i> One-time Supabase setup needed.</strong> Run this once in Supabase → SQL Editor, then refresh this page:
+                    <pre style="background:#0f172a;color:#e2e8f0;padding:12px 16px;border-radius:8px;font-size:0.75rem;overflow-x:auto;margin:10px 0 0;">create table if not exists app_admins (
+  email text primary key,
+  added_by text,
+  added_at timestamptz default now()
+);
+alter table app_admins enable row level security;
+
+create policy "Signed-in users can read admin list"
+on app_admins for select to authenticated using (true);
+
+create policy "Only main admin adds admins"
+on app_admins for insert to authenticated
+with check ((auth.jwt() ->> 'email') = 'gbmandeep@hotmail.com');
+
+create policy "Only main admin removes admins"
+on app_admins for delete to authenticated
+using ((auth.jwt() ->> 'email') = 'gbmandeep@hotmail.com');</pre>
+                </div>
+                <div style="border:1px solid #e2e8f0; border-radius:10px; overflow:hidden; margin-bottom:16px;">
+                    <div id="adminListBody"><div style="padding:14px;font-size:0.82rem;color:#94a3b8;">Loading admin list...</div></div>
+                </div>
+                <div id="adminAddForm" style="display:none; gap:10px; align-items:center;">
+                    <input type="email" id="newAdminEmail" placeholder="email@example.com" onkeydown="if(event.key==='Enter') addAdminEmail()" style="flex:1; padding:11px 14px; border-radius:8px; border:1px solid #e2e8f0; font-size:0.86rem;">
+                    <button onclick="addAdminEmail()" style="padding:11px 18px; border-radius:8px; border:none; background:var(--brand); color:white; cursor:pointer; font-weight:700; font-size:0.85rem; white-space:nowrap;"><i class="fas fa-user-plus"></i> Add Admin</button>
+                </div>
+            </div>
+
             <!-- ═══ CHANGE PASSWORD ═══ -->
             <div style="background:white; border-radius:16px; border:1px solid #e2e8f0; padding:28px; margin-bottom:20px; box-shadow:0 2px 4px rgba(0,0,0,0.02);">
                 <div style="display:flex; align-items:center; gap:14px; margin-bottom:24px; padding-bottom:18px; border-bottom:1px solid #f1f5f9;">
@@ -2288,6 +2326,7 @@
                         <div style="font-size:0.8rem;color:#94a3b8;margin-top:2px;">Full history of merges, deletions and bulk actions from Supabase</div>
                     </div>
                     <div style="margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+                        <input type="text" id="auditSearchInput" placeholder="Search log — name, email, action..." oninput="setAuditSearch(this.value)" style="padding:7px 12px;border-radius:8px;border:1px solid #e2e8f0;font-size:0.8rem;min-width:210px;">
                         <div id="auditFilterBar" style="display:flex;gap:6px;flex-wrap:wrap;">
                             <button onclick="setAuditFilter('ALL')"    id="af-ALL"     class="audit-filter-btn audit-filter-active">All</button>
                             <button onclick="setAuditFilter('CREATE')" id="af-CREATE"  class="audit-filter-btn">Create</button>
@@ -2301,6 +2340,9 @@
                         </button>
                         <button onclick="exportAuditCSV()" style="padding:7px 14px;border-radius:8px;border:1px solid #e2e8f0;background:white;color:#475569;font-weight:700;font-size:0.78rem;cursor:pointer;display:flex;align-items:center;gap:6px;white-space:nowrap;">
                             <i class="fas fa-download"></i> Export CSV
+                        </button>
+                        <button onclick="clearAuditLog()" style="padding:7px 14px;border-radius:8px;border:1px solid #fecaca;background:#fff5f5;color:#dc2626;font-weight:700;font-size:0.78rem;cursor:pointer;display:flex;align-items:center;gap:6px;white-space:nowrap;">
+                            <i class="fas fa-trash-alt"></i> Clear Log
                         </button>
                     </div>
                 </div>
@@ -2570,6 +2612,12 @@
     let currentEmailLink = '';
     let destructClicks = 0;
     let isCloud = false;
+    // Build stamp — open the browser console (F12) to see which build is
+    // actually running. GitHub Pages can serve a cached OLD file for a while
+    // after you upload a new one; if this doesn't match what you deployed,
+    // hard-refresh (Ctrl+Shift+R) or wait a few minutes.
+    const APP_BUILD = 'v3.3 \u2014 13 Jul 2026 (same-role duplicate scan)';
+    try { console.log('%cDeepCerts build: ' + APP_BUILD, 'color:#2563eb;font-weight:bold;font-size:13px'); } catch(e) {}
     let cloudDB = null;
 
     const certTypes = [
@@ -3066,9 +3114,20 @@
     async function flushOfflineQueue() {
         if (!isCloud || !cloudDB) return;
         try {
-            const q = JSON.parse(localStorage.getItem(QUEUE_KEY) || '[]');
+            let q = JSON.parse(localStorage.getItem(QUEUE_KEY) || '[]');
             if (!q.length) return;
-            console.log(`Flushing ${q.length} offline queued writes...`);
+            // Drop stale ops (>24h old). A stale queued edit contains the FULL
+            // old record and would silently overwrite newer data — e.g. undo a
+            // merge — every time it flushes, which happens on every page load.
+            const MAX_QUEUE_AGE = 24 * 60 * 60 * 1000;
+            const freshOps = q.filter(op => !op._ts || (Date.now() - op._ts) < MAX_QUEUE_AGE);
+            if (freshOps.length !== q.length) {
+                console.warn(`Dropped ${q.length - freshOps.length} stale offline op(s) older than 24h`);
+                localStorage.setItem(QUEUE_KEY, JSON.stringify(freshOps));
+            }
+            q = freshOps;
+            if (!q.length) return;
+            console.log(`Flushing ${q.length} offline queued writes...`, q);
             const remaining = [];
             for (const op of q) {
                 try {
@@ -3375,6 +3434,8 @@
     }
 
     function showSection(id) {
+        // Refresh the admin list panel whenever Settings opens
+        if (id === 'settings') { try { renderAdminList(); } catch(e) {} }
         // Admin-only section guard
         if ((id === 'audit' || id === 'settings') && !isAdmin()) {
             showToast('Access denied — admin only', 'error');
@@ -4453,6 +4514,14 @@
                 if (used.has(j)) continue;
                 const a = contacts[i]; const b = contacts[j];
 
+                // CRITICAL FIX: only compare contacts with the SAME role.
+                // A landlord entry and an agent entry with the same name are
+                // the same person in two roles — that is NOT a duplicate, and
+                // merging cannot collapse it (the names are already identical,
+                // so the rewrite is a no-op and the pair reappears after every
+                // refresh). This one line removes all those fake groups.
+                if (a.role !== b.role) continue;
+
                 const nameScore  = nameSimilarity(a.name, b.name);
                 const phoneScore = phoneSimilarity(a.phone, b.phone);
                 const emailScore = emailSimilarity(a.email, b.email);
@@ -4656,35 +4725,99 @@
         }).join('');
     }
 
+    // ── Name normaliser for merge matching ─────────────────────────
+    // The duplicate scanner (nameSimilarity) trims/collapses whitespace,
+    // but the DB can hold values like "John Smith " or "John  SMITH".
+    // The old merge used an exact lowercase match, so those records were
+    // silently skipped — the merge appeared to "do nothing" and the same
+    // duplicates came back after every refresh. Always compare with this.
+    function _normName(s) { return (s || '').toLowerCase().trim().replace(/\s+/g, ' '); }
+
     async function mergeAndKeep(groupIdx, keepIdx) {
         const group = window._dupGroups?.[groupIdx];
         if (!group) return;
         const keeper = group.contacts[keepIdx];
         const others = group.contacts.filter((_, i) => i !== keepIdx);
 
-        // Build list of { docId, field, newValue } to update
+        // Safety: never write a phone/email fallback "name" into the name column
+        if (keeper.isNameless) {
+            showToast('The record you chose to keep has no real name (only phone/email). Keep the record with a proper name, or edit this one to add a name first.', 'error');
+            return;
+        }
+        // Safety: some records have a phone number or email STORED in the name
+        // column — never spread that to other records as if it were a name
+        const _digitsOnly = keeper.name.replace(/[\s+\-().]/g, '');
+        if (/^\d{7,}$/.test(_digitsOnly) || /@/.test(keeper.name)) {
+            showToast('The record you chose to keep has a phone number / email stored as its name. Edit it to a real name first, then merge into it.', 'error');
+            return;
+        }
+        if (!isCloud || !cloudDB) {
+            showToast('Cloud connection unavailable \u2014 merge needs Supabase online.', 'error');
+            return;
+        }
+
+        // Flush any queued offline writes FIRST — a stale queued edit holds the
+        // OLD record and would silently overwrite this merge after it saves
+        try { await flushOfflineQueue(); } catch(e) {}
+
+        const keeperNorm = _normName(keeper.name);
         const toUpdate = [];
+        const seen = new Set();
+        const addCert = (cert, field) => {
+            const key = String(cert.id) + '|' + field;
+            if (seen.has(key)) return;
+            seen.add(key);
+            toUpdate.push({ docId: String(cert.id), field, cert });
+        };
+
+        // 1) All certificates belonging to the "loser" contacts — matched with
+        //    normalisation so whitespace/case variants in the DB are included
         for (const other of others) {
             const field = other.role === 'landlord' ? 'landlordName' : 'agentDetails';
+            const otherNorm = _normName(other.rawName || other.name);
             for (const cert of certificates) {
-                if ((cert[field] || '').toLowerCase() === other.name.toLowerCase()) {
-                    toUpdate.push({ docId: String(cert.id), field, cert });
+                if (other.isNameless) {
+                    if (field === 'landlordName' &&
+                        (!cert.landlordName || !cert.landlordName.trim()) &&
+                        ((other.phone && cert.phoneNumber === other.phone) ||
+                         (other.email && cert.email === other.email))) {
+                        addCert(cert, field);
+                    }
+                } else if (_normName(cert[field]) === otherNorm) {
+                    addCert(cert, field);
                 }
             }
         }
 
+        // 2) The keeper's own certificates whose stored spelling differs
+        //    (e.g. "JOHN SMITH ", "john  smith") — rewrite those too, so after
+        //    this merge every record holds ONE exact canonical name and the
+        //    contact shows as a single person from the next load onwards
+        {
+            const field = keeper.role === 'landlord' ? 'landlordName' : 'agentDetails';
+            for (const cert of certificates) {
+                const raw = cert[field] || '';
+                if (raw !== keeper.name && _normName(raw) === keeperNorm) addCert(cert, field);
+            }
+        }
+
         if (!toUpdate.length) return showToast('No matching certificates found', 'error');
-        if (!confirm(`Merge ${others.map(o => `"${o.name}"`).join(', ')} → "${keeper.name}"?\n${toUpdate.length} certificate(s) will be updated.`)) return;
+        if (!confirm(`Merge ${others.map(o => `"${o.name}"`).join(', ')} \u2192 "${keeper.name}"?\n${toUpdate.length} certificate(s) will be updated.`)) return;
 
         showToast(`Merging ${toUpdate.length} records...`);
+        console.log(`[MERGE ${APP_BUILD}] Writing "${keeper.name}" to ${toUpdate.length} record(s)`, toUpdate.map(i => i.docId));
 
-        let saved = 0;
-        let failed = 0;
+        // Capture states BEFORE any write, for the audit trail
+        const allAffectedCerts = toUpdate.map(item => {
+            const copy = JSON.parse(JSON.stringify(item.cert));
+            delete copy.searchBlob; delete copy._status;
+            return copy;
+        });
+
         const errors = [];
-
         const fieldToDbCol = { landlordName: 'landlord_name', agentDetails: 'agent_details' };
 
-        // FIX (N+1 Bug): Group by field → bulk .in() update (1-2 requests instead of N)
+        // Group by field \u2192 bulk .in() update (1-2 requests instead of N)
         const byField = {};
         for (const item of toUpdate) {
             if (!byField[item.field]) byField[item.field] = [];
@@ -4693,36 +4826,85 @@
 
         for (const [field, items] of Object.entries(byField)) {
             const dbCol = fieldToDbCol[field];
-            if (!dbCol) { failed += items.length; errors.push(`Unknown field: ${field}`); continue; }
+            if (!dbCol) { errors.push(`Unknown field: ${field}`); continue; }
             const ids = items.map(i => i.docId);
-            console.log(`Bulk merge: ${dbCol} = "${keeper.name}" for ids:`, ids);
             try {
                 const { error } = await cloudDB
                     .from('certificates')
                     .update({ [dbCol]: keeper.name })
                     .in('id', ids);
                 if (error) throw error;
-                items.forEach(i => { i.cert[field] = keeper.name; });
-                saved += items.length;
-                console.log(`✅ Bulk merged ${ids.length} records for ${dbCol}`);
             } catch(e) {
-                failed += items.length;
                 errors.push(`${field}: ${e.message}`);
-                console.error(`❌ Bulk merge failed for ${field}:`, e);
+                console.error(`\u274c Bulk merge write failed for ${field}:`, e);
             }
         }
-        // Capture states of ALL affected certificates BEFORE merge
-        const allAffectedCerts = toUpdate.map(item => {
-            const cert = certificates.find(c => String(c.id) === item.docId);
-            return cert ? JSON.parse(JSON.stringify(cert)) : null;
-        }).filter(Boolean);
-        allAffectedCerts.forEach(c => { delete c.searchBlob; delete c._status; });
+
+        // ── READ-BACK VERIFICATION ──────────────────────────────────
+        // Never trust the write response. Supabase (PostgREST) reports success
+        // even when Row Level Security silently blocks an UPDATE — it just
+        // changes 0 rows, and everything reverts on refresh. So re-read the
+        // exact rows fresh from the database and check what is REALLY stored.
+        let saved = 0;
+        let failed = 0;
+        const verifiedIds = new Set();
+        const notPersisted = [];
+        let verificationRan = false;
+        try {
+            const allIds = toUpdate.map(i => i.docId);
+            const { data: freshRows, error: vErr } = await cloudDB
+                .from('certificates')
+                .select('id, landlord_name, agent_details')
+                .in('id', allIds);
+            if (vErr) throw vErr;
+            verificationRan = true;
+            const rowById = {};
+            (freshRows || []).forEach(r => { rowById[String(r.id)] = r; });
+            for (const item of toUpdate) {
+                const dbRow = rowById[item.docId];
+                const dbVal = dbRow ? (item.field === 'landlordName' ? dbRow.landlord_name : dbRow.agent_details) : undefined;
+                if (dbVal === keeper.name) {
+                    verifiedIds.add(item.docId + '|' + item.field);
+                    saved++;
+                } else {
+                    failed++;
+                    notPersisted.push({ id: item.docId, field: item.field, stillStored: dbVal });
+                }
+            }
+            console.log(`[MERGE] Verification: ${saved} confirmed in Supabase, ${failed} NOT persisted`, notPersisted);
+        } catch(e) {
+            console.warn('[MERGE] Verification read failed (network?):', e);
+            // Can't verify — be honest with the user rather than guessing
+            failed = toUpdate.length;
+            errors.push('Could not verify the save (connection issue). Refresh and re-check.');
+        }
+
+        // Update in-memory data ONLY for rows the database confirmed
+        for (const item of toUpdate) {
+            if (verifiedIds.has(item.docId + '|' + item.field)) {
+                item.cert[item.field] = keeper.name;
+                updateSearchIndex(item.cert);
+            }
+        }
+        invalidateContactCache();
+
+        // Remove any queued offline writes for these records — they contain
+        // pre-merge data and would undo the merge next time the queue flushes
+        try {
+            const qq = JSON.parse(localStorage.getItem(QUEUE_KEY) || '[]');
+            const affectedIdSet = new Set(toUpdate.map(i => i.docId));
+            const cleaned = qq.filter(op => !(op.type === 'upsert' && op.data && affectedIdSet.has(String(op.data.id))));
+            if (cleaned.length !== qq.length) {
+                localStorage.setItem(QUEUE_KEY, JSON.stringify(cleaned));
+                console.warn(`[MERGE] Removed ${qq.length - cleaned.length} stale offline op(s) that would have reverted this merge`);
+            }
+        } catch(e) {}
 
         // Audit: MERGE with full state capture for ALL merged records
         auditTrail('MERGE', {
             certificateId: null,
             previousState: allAffectedCerts.length > 0 ? {
-                _summary: `${saved} certificate(s) before merge`,
+                _summary: `${allAffectedCerts.length} certificate(s) before merge`,
                 affectedCertificates: allAffectedCerts
             } : null,
             newState: {
@@ -4740,21 +4922,28 @@
         });
 
         if (failed > 0) {
-            alert(`❌ ${failed} saves failed:\n${errors.join('\n')}\n\nCheck F12 console.`);
+            if (verificationRan && notPersisted.length > 0 && errors.length === 0) {
+                // Writes were "accepted" but the database still holds the old
+                // values \u2014 the classic silent Row Level Security block.
+                alert(
+                    '\u274c MERGE DID NOT SAVE TO SUPABASE\n\n' +
+                    `The app sent the update, Supabase reported no error, but when read back ${notPersisted.length} record(s) still hold the OLD name.\n\n` +
+                    'This is almost always Row Level Security silently blocking UPDATE on the "certificates" table (reading works, so SELECT is allowed, but UPDATE has no policy).\n\n' +
+                    'FIX \u2014 run this ONCE in Supabase \u2192 SQL Editor:\n\n' +
+                    'create policy "Signed-in users can update certificates"\n' +
+                    'on certificates for update to authenticated\n' +
+                    'using (true) with check (true);\n\n' +
+                    'Then retry the merge. (Also check the F12 console for the build number \u2014 if it is not "' + APP_BUILD + '", your browser is running an old cached copy: press Ctrl+Shift+R.)'
+                );
+            } else {
+                alert(`\u274c ${failed} save(s) failed:\n${errors.join('\n')}\n\nCheck the F12 console for details.`);
+            }
         } else {
-            showToast(`✅ Merged into "${keeper.name}" — ${saved} records saved`);
+            showToast(`\u2705 Merged into "${keeper.name}" \u2014 ${saved} records verified in Supabase`, 'success');
         }
 
-        // ── Only reload if all saves succeeded ───────────────────
-        if (failed > 0) return;
-
-        showToast(`Reloading from Supabase to confirm changes...`, 'success');
-
-        // Pull fresh data from Supabase — this is the source of truth
-        // and confirms the writes actually persisted
-        if (isCloud) {
-            await loadCertificatesFromCloud();
-        }
+        // ── Always reload so the UI shows the true database state ──
+        await loadCertificatesFromCloud();
 
         // Rebuild duplicate groups from fresh in-memory data
         const freshGroups = findDuplicateGroups ? findDuplicateGroups() : [];
@@ -4768,8 +4957,9 @@
 
         if (typeof renderDuplicateResults === 'function') renderDuplicateResults(freshGroups);
         renderDirectory();
-        showToast(`✅ Merge complete — ${saved} records saved and confirmed in Supabase`, 'success');
+        if (failed === 0) showToast(`\u2705 Merge complete \u2014 ${saved} records confirmed in Supabase`, 'success');
     }
+
 
 
     function getMissingFields(c) {
@@ -6705,6 +6895,47 @@
         renderAuditTable();
     }
 
+    // ── Audit log free-text search (debounced) ──
+    let _auditSearch = '';
+    let _auditSearchTimer = null;
+    function setAuditSearch(val) {
+        clearTimeout(_auditSearchTimer);
+        _auditSearchTimer = setTimeout(() => {
+            _auditSearch = (val || '').trim().toLowerCase();
+            _auditPage = 0;
+            renderAuditTable();
+        }, 200);
+    }
+
+    // ── Clear the entire audit log (admin only, double confirm) ──
+    async function clearAuditLog() {
+        if (!isAdmin()) return showToast('Access denied — admin only', 'error');
+        if (!isCloud || !cloudDB) return showToast('Cloud connection unavailable', 'error');
+        if (!confirm('Permanently delete the ENTIRE audit history from Supabase?\n\nThis cannot be undone. Tip: click "Export CSV" first to keep a copy.')) return;
+        if (!confirm('Final confirmation — wipe ALL audit log entries now?')) return;
+        try {
+            const tbl = _auditLogsUsingLegacyTable ? 'logs' : 'audit_logs';
+            const { error } = await cloudDB.from(tbl).delete().not('id', 'is', null);
+            if (error) throw error;
+            // Verify the delete actually happened — RLS can silently delete 0 rows
+            const { count } = await cloudDB.from(tbl).select('id', { count: 'exact', head: true });
+            if (count && count > 0) {
+                alert('❌ Supabase silently blocked the delete (Row Level Security) — ' + count + ' entries still exist.\n\nFIX — run this ONCE in Supabase → SQL Editor:\n\ncreate policy "Signed-in users can clear audit log"\non ' + tbl + ' for delete to authenticated\nusing (true);\n\nThen try again.');
+                return;
+            }
+            _sessionAuditBuffer = [];
+            _auditAllRows = [];
+            _auditPage = 0;
+            renderAuditTable();
+            const strip = document.getElementById('auditStatsStrip');
+            if (strip) strip.innerHTML = '';
+            showToast('✅ Audit log cleared', 'success');
+        } catch(e) {
+            console.error('Clear audit log failed:', e);
+            showToast('Failed to clear log: ' + e.message, 'error');
+        }
+    }
+
     async function loadAuditLog() {
         if (!isCloud || !cloudDB) {
             document.getElementById('auditLogBody').innerHTML =
@@ -6799,9 +7030,23 @@
         const nextBtn = document.getElementById('auditNextBtn');
         const pageInfo = document.getElementById('auditPageInfo');
         if (!body) return;
-        const filtered = _auditFilter === 'ALL' ? _auditAllRows
+        let filtered = _auditFilter === 'ALL' ? _auditAllRows
             : _auditFilter === 'BULK' ? _auditAllRows.filter(r => r.action_type?.startsWith('BULK_'))
             : _auditAllRows.filter(r => r.action_type === _auditFilter);
+        if (_auditSearch) {
+            filtered = filtered.filter(r => {
+                try {
+                    const hay = [
+                        r.action_type || r.action || '',
+                        r.changed_by || '',
+                        JSON.stringify(r.metadata || r.payload || ''),
+                        JSON.stringify(r.new_state || ''),
+                        JSON.stringify(r.previous_state || '')
+                    ].join(' ').toLowerCase();
+                    return hay.includes(_auditSearch);
+                } catch(e) { return true; }
+            });
+        }
         if (!filtered.length) {
             body.innerHTML = '<tr><td colspan="5" style="padding:40px;text-align:center;color:#94a3b8;"><i class="fas fa-inbox" style="font-size:1.5rem;display:block;margin-bottom:8px;opacity:0.4;"></i>No entries found.</td></tr>';
             if (pageInfo) pageInfo.textContent = '';
@@ -7055,9 +7300,104 @@
 
     const ADMIN_EMAIL = 'gbmandeep@hotmail.com';
 
+    // ── Additional admins (stored in the Supabase table: app_admins) ──
+    let _extraAdmins = [];          // lowercase emails loaded from app_admins
+    let _adminTableMissing = false; // true until the one-time SQL has been run
+
     function isAdmin() {
         if (!_currentUser) return false;
-        return _currentUser.email === ADMIN_EMAIL;
+        const em = (_currentUser.email || '').toLowerCase();
+        return em === ADMIN_EMAIL || _extraAdmins.includes(em);
+    }
+
+    function isSuperAdmin() {
+        return !!_currentUser && (_currentUser.email || '').toLowerCase() === ADMIN_EMAIL;
+    }
+
+    async function loadExtraAdmins() {
+        if (!isCloud || !cloudDB || !_currentUser) return;
+        try {
+            const { data, error } = await cloudDB.from('app_admins').select('email');
+            if (error) {
+                if (error.code === '42P01' || /does not exist/i.test(error.message || '')) {
+                    _adminTableMissing = true;
+                } else {
+                    console.warn('app_admins load error:', error.message);
+                }
+            } else {
+                _adminTableMissing = false;
+                _extraAdmins = (data || []).map(r => (r.email || '').toLowerCase());
+            }
+        } catch(e) { console.warn('loadExtraAdmins failed:', e); }
+        applyAdminVisibility();
+        renderAdminList();
+    }
+
+    function renderAdminList() {
+        const bt = document.getElementById('appBuildTag');
+        if (bt && typeof APP_BUILD !== 'undefined') bt.textContent = 'Build: ' + APP_BUILD;
+        const listEl = document.getElementById('adminListBody');
+        const setupEl = document.getElementById('adminSetupHelp');
+        const formEl = document.getElementById('adminAddForm');
+        if (!listEl) return;
+        if (_adminTableMissing) {
+            if (setupEl) setupEl.style.display = 'block';
+            if (formEl) formEl.style.display = 'none';
+            listEl.innerHTML = '<div style="padding:14px;font-size:0.82rem;color:#94a3b8;">Admin list unavailable — run the one-time SQL above first.</div>';
+            return;
+        }
+        if (setupEl) setupEl.style.display = 'none';
+        if (formEl) formEl.style.display = isSuperAdmin() ? 'flex' : 'none';
+        const rows = [
+            { email: ADMIN_EMAIL, main: true },
+            ..._extraAdmins.map(e => ({ email: e, main: false }))
+        ];
+        listEl.innerHTML = rows.map(r => `
+            <div style="display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid #f1f5f9;">
+                <i class="fas ${r.main ? 'fa-crown' : 'fa-user-shield'}" style="color:${r.main ? '#f59e0b' : '#6366f1'};width:18px;text-align:center;"></i>
+                <span style="flex:1;font-size:0.86rem;color:#0f172a;font-weight:600;">${escapeHTML(r.email)}</span>
+                ${r.main
+                    ? '<span style="font-size:0.68rem;font-weight:700;color:#92400e;background:#fef3c7;padding:2px 8px;border-radius:10px;">MAIN ADMIN</span>'
+                    : (isSuperAdmin() ? `<button onclick="removeAdminEmail('${escapeHTML(r.email)}')" style="padding:4px 10px;border-radius:6px;border:1px solid #fecaca;background:#fff5f5;color:#dc2626;cursor:pointer;font-size:0.72rem;font-weight:700;"><i class="fas fa-times"></i> Remove</button>` : '<span style="font-size:0.68rem;font-weight:700;color:#4338ca;background:#eef2ff;padding:2px 8px;border-radius:10px;">ADMIN</span>')}
+            </div>`).join('');
+    }
+
+    async function addAdminEmail() {
+        if (!isSuperAdmin()) return showToast('Only the main admin can add admins', 'error');
+        const inp = document.getElementById('newAdminEmail');
+        const email = (inp?.value || '').trim().toLowerCase();
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return showToast('Enter a valid email address', 'error');
+        if (email === ADMIN_EMAIL || _extraAdmins.includes(email)) return showToast('That email is already an admin', 'error');
+        try {
+            const { error } = await cloudDB.from('app_admins').insert({ email, added_by: _currentUser?.email || 'system' });
+            if (error) throw error;
+            _extraAdmins.push(email);
+            if (inp) inp.value = '';
+            renderAdminList();
+            showToast(`✅ ${email} now has admin access (they must already have a sign-in account for this app)`, 'success');
+        } catch(e) {
+            if (e.code === '42P01' || /does not exist/i.test(e.message || '')) {
+                _adminTableMissing = true;
+                renderAdminList();
+                showToast('One-time Supabase setup needed — see the yellow box in Settings', 'warning');
+            } else {
+                showToast('Failed to add admin: ' + e.message, 'error');
+            }
+        }
+    }
+
+    async function removeAdminEmail(email) {
+        if (!isSuperAdmin()) return showToast('Only the main admin can remove admins', 'error');
+        if (!confirm(`Remove admin access for ${email}?`)) return;
+        try {
+            const { error } = await cloudDB.from('app_admins').delete().eq('email', email);
+            if (error) throw error;
+            _extraAdmins = _extraAdmins.filter(e => e !== email);
+            renderAdminList();
+            showToast(`Admin access removed for ${email}`, 'success');
+        } catch(e) {
+            showToast('Failed to remove: ' + e.message, 'error');
+        }
     }
 
     function applyAdminVisibility() {
@@ -7085,6 +7425,7 @@
         updateUserBadge(user);
         _currentUser = user;
         applyAdminVisibility();
+        loadExtraAdmins();
         // Trigger app load
         attemptConnection();
     }
@@ -7138,6 +7479,7 @@
             if (event === 'SIGNED_IN' && session?.user) {
                 _currentUser = session.user;
                 applyAdminVisibility();
+                loadExtraAdmins();
             }
             if (event === 'SIGNED_OUT') {
                 _currentUser = null;

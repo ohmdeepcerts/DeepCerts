@@ -2616,7 +2616,7 @@ using ((auth.jwt() ->> 'email') = 'gbmandeep@hotmail.com');</pre>
     // actually running. GitHub Pages can serve a cached OLD file for a while
     // after you upload a new one; if this doesn't match what you deployed,
     // hard-refresh (Ctrl+Shift+R) or wait a few minutes.
-    const APP_BUILD = 'v3.3 \u2014 13 Jul 2026 (same-role duplicate scan)';
+    const APP_BUILD = 'v3.7 \u2014 14 Jul 2026 (fix: merge busy-state / no more silent freeze)';
     try { console.log('%cDeepCerts build: ' + APP_BUILD, 'color:#2563eb;font-weight:bold;font-size:13px'); } catch(e) {}
     let cloudDB = null;
 
@@ -4478,11 +4478,19 @@ using ((auth.jwt() ->> 'email') = 'gbmandeep@hotmail.com');</pre>
         if (!a || !b) return 0;
         const da = phoneDigits(a); const db = phoneDigits(b);
         if (!da || !db) return 0;
+        // Require at least 7 significant digits before ANY comparison.
+        // A value like a bare "+44" normalises to just "44" (2 digits) —
+        // that's a truncated country-code stub, not a real phone number.
+        // Without this guard, two landlords who both only have "+44" on
+        // file scored a 100% "exact match" purely because two incomplete
+        // values happened to equal each other, bundling totally unrelated
+        // people into the same duplicate group regardless of name/email.
+        if (da.length < 7 || db.length < 7) return 0;
         if (da === db) return 100;
         // Last 9 digits match = very likely same number
         if (da.length >= 9 && db.length >= 9 && da.slice(-9) === db.slice(-9)) return 90;
         // Last 7 digits
-        if (da.length >= 7 && db.length >= 7 && da.slice(-7) === db.slice(-7)) return 75;
+        if (da.slice(-7) === db.slice(-7)) return 75;
         return 0;
     }
 
@@ -4630,7 +4638,7 @@ using ((auth.jwt() ->> 'email') = 'gbmandeep@hotmail.com');</pre>
                                     <span><i class="fas fa-home" style="margin-right:3px;"></i>${certCount} certs · <span style="color:${scoreCol}; font-weight:700;">${score}% compliant</span></span>
                                 </div>
                             </div>
-                            <button class="dup-keep-btn" onclick="mergeAndKeep(${gi}, ${ri})" title="Keep this contact, merge others into it">
+                            <button class="dup-keep-btn" onclick="openMergeResolver(${gi}, ${ri})" title="Choose which details to keep, then merge">
                                 <i class="fas fa-check" style="margin-right:4px;"></i>Keep This One
                             </button>
                         </div>`;
@@ -4733,219 +4741,361 @@ using ((auth.jwt() ->> 'email') = 'gbmandeep@hotmail.com');</pre>
     // duplicates came back after every refresh. Always compare with this.
     function _normName(s) { return (s || '').toLowerCase().trim().replace(/\s+/g, ' '); }
 
-    async function mergeAndKeep(groupIdx, keepIdx) {
+    // ═══════════════════════════════════════════════════════════════
+    // CONTACT MERGE — side-by-side resolver + verified execution
+    // ═══════════════════════════════════════════════════════════════
+
+    let _resolverState = null;
+    window._isMerging = false;
+
+    // Lock/unlock the resolver UI while a merge is actually running, with a
+    // visible spinner + status text. Previously nothing indicated the app
+    // was busy during the network write + read-back verify + full reload +
+    // duplicate rescan (which can take a couple of seconds on a large list)
+    // — it just looked frozen, and any typing during that window was silently
+    // dropped because the browser tab was blocked on a long synchronous loop.
+    function _setResolverBusy(isBusy, statusText) {
+        window._isMerging = isBusy;
+        const line = document.getElementById('resolverStatusLine');
+        const text = document.getElementById('resolverStatusText');
+        const mergeBtn  = document.getElementById('resolverMergeBtn');
+        const cancelBtn = document.getElementById('resolverCancelBtn');
+        const closeX    = document.getElementById('resolverCloseX');
+        if (line) line.style.display = isBusy ? 'flex' : 'none';
+        if (text && statusText) text.textContent = statusText;
+        [mergeBtn, cancelBtn, closeX].forEach(btn => {
+            if (!btn) return;
+            btn.disabled = isBusy;
+            btn.style.opacity = isBusy ? '0.5' : '1';
+            btn.style.cursor = isBusy ? 'not-allowed' : 'pointer';
+            btn.style.pointerEvents = isBusy ? 'none' : 'auto';
+        });
+        document.querySelectorAll('#resolverBody input, #resolverBody button').forEach(el => {
+            el.disabled = isBusy;
+            el.style.opacity = isBusy ? '0.55' : '1';
+        });
+    }
+
+    function _looksLikeSciNotation(v) { return /^[\d.]+E[+\-]?\d+$/i.test((v || '').trim()); }
+    function _looksLikePhoneOnly(v) { const d = (v || '').replace(/[\s+\-().]/g, ''); return /^\d{7,}$/.test(d); }
+    function _looksLikeEmailOnly(v) { return /@/.test(v || ''); }
+
+    // Collect every distinct non-empty value for a field across the group's
+    // contacts, so the modal can offer them all as choices — not just the
+    // one the person happened to click "Keep This One" on.
+    function _distinctValues(contacts, key) {
+        const seen = new Map(); // value -> first contact index that has it
+        contacts.forEach((c, idx) => {
+            const v = (c[key] || '').trim();
+            if (v && !seen.has(v)) seen.set(v, idx);
+        });
+        return Array.from(seen.entries()).map(([value, idx]) => ({ value, idx }));
+    }
+
+    function openMergeResolver(groupIdx, defaultIdx) {
         const group = window._dupGroups?.[groupIdx];
         if (!group) return;
-        const keeper = group.contacts[keepIdx];
-        const others = group.contacts.filter((_, i) => i !== keepIdx);
+        const contacts = group.contacts;
 
-        // Safety: never write a phone/email fallback "name" into the name column
-        if (keeper.isNameless) {
-            showToast('The record you chose to keep has no real name (only phone/email). Keep the record with a proper name, or edit this one to add a name first.', 'error');
-            return;
-        }
-        // Safety: some records have a phone number or email STORED in the name
-        // column — never spread that to other records as if it were a name
-        const _digitsOnly = keeper.name.replace(/[\s+\-().]/g, '');
-        if (/^\d{7,}$/.test(_digitsOnly) || /@/.test(keeper.name)) {
-            showToast('The record you chose to keep has a phone number / email stored as its name. Edit it to a real name first, then merge into it.', 'error');
-            return;
-        }
-        if (!isCloud || !cloudDB) {
-            showToast('Cloud connection unavailable \u2014 merge needs Supabase online.', 'error');
-            return;
-        }
+        const nameOpts  = _distinctValues(contacts.filter(c => !c.isNameless), 'name');
+        const phoneOpts = _distinctValues(contacts, 'phone');
+        const emailOpts = _distinctValues(contacts, 'email');
 
-        // Flush any queued offline writes FIRST — a stale queued edit holds the
-        // OLD record and would silently overwrite this merge after it saves
+        // Sensible defaults: prefer the clicked contact's value; if it's
+        // missing, nameless, or looks corrupted (Excel scientific notation),
+        // fall back to the best alternative found anywhere in the group.
+        const clicked = contacts[defaultIdx];
+
+        let defaultName = (!clicked.isNameless && clicked.name) ? clicked.name : (nameOpts[0]?.value || '');
+        let defaultPhone = (clicked.phone && !_looksLikeSciNotation(clicked.phone)) ? clicked.phone
+            : (phoneOpts.find(o => !_looksLikeSciNotation(o.value))?.value || clicked.phone || '');
+        let defaultEmail = clicked.email || emailOpts[0]?.value || '';
+
+        _resolverState = {
+            groupIdx,
+            contacts,
+            role: contacts[0]?.role || 'landlord',
+            fields: {
+                name:  { value: defaultName,  source: 'auto' },
+                phone: { value: defaultPhone, source: 'auto' },
+                email: { value: defaultEmail, source: 'auto' }
+            },
+            nameOpts, phoneOpts, emailOpts
+        };
+        renderResolverModal();
+        document.getElementById('resolverOverlay').style.display = 'flex';
+    }
+
+    function closeMergeResolver() {
+        document.getElementById('resolverOverlay').style.display = 'none';
+        _resolverState = null;
+    }
+
+    function _resolverFieldRow(label, key, icon, opts, required) {
+        const st = _resolverState.fields[key];
+        const chips = opts.map(o => {
+            const corrupted = key === 'phone' && _looksLikeSciNotation(o.value);
+            const selected = st.source !== 'custom' && st.value === o.value;
+            return `<button type="button" class="resolver-chip" data-field="${key}" data-corrupted="${corrupted ? '1' : '0'}"
+                onclick="selectResolverField('${key}', ${JSON.stringify(o.value).replace(/"/g, '&quot;')})"
+                style="text-align:left; padding:9px 14px; border-radius:8px; border:2px solid ${selected ? '#2563eb' : (corrupted ? '#fecaca' : '#e2e8f0')}; background:${selected ? '#eff6ff' : (corrupted ? '#fff5f5' : 'white')}; cursor:pointer; font-size:0.85rem; color:${corrupted ? '#dc2626' : '#0f172a'}; font-weight:${selected ? '700' : '500'}; display:flex; align-items:center; gap:8px; width:100%;">
+                <i class="${selected ? 'fas fa-check-circle' : 'far fa-circle'} resolver-chip-icon" style="color:${selected ? '#2563eb' : '#cbd5e1'};"></i>
+                <span style="flex:1;">${escapeHTML(o.value)}</span>
+                ${corrupted ? '<span style="font-size:0.68rem;font-weight:700;color:#dc2626;background:#fee2e2;padding:2px 7px;border-radius:8px;">looks corrupted</span>' : ''}
+            </button>`;
+        }).join('');
+        const customSelected = st.source === 'custom';
+        return `<div style="margin-bottom:20px;">
+            <div style="font-size:0.82rem; font-weight:800; color:#0f172a; margin-bottom:8px; display:flex; align-items:center; gap:6px;">
+                <i class="fas ${icon}" style="color:#64748b; width:16px;"></i>${label} ${required ? '<span style="color:#dc2626;">*</span>' : '<span style="font-weight:500;color:#94a3b8;">(optional)</span>'}
+            </div>
+            <div style="display:flex; flex-direction:column; gap:6px;">
+                ${chips || `<div style="font-size:0.8rem;color:#94a3b8;padding:9px 14px;">No ${label.toLowerCase()} found on any record in this group.</div>`}
+                <div class="resolver-custom-row" data-field="${key}" style="display:flex; align-items:center; gap:8px; padding:9px 14px; border-radius:8px; border:2px solid ${customSelected ? '#2563eb' : '#e2e8f0'}; background:${customSelected ? '#eff6ff' : 'white'};">
+                    <i class="${customSelected ? 'fas fa-check-circle' : 'far fa-circle'} resolver-custom-icon" style="color:${customSelected ? '#2563eb' : '#cbd5e1'};"></i>
+                    <input type="text" class="resolver-custom-input" data-field="${key}" placeholder="Type a different ${label.toLowerCase()}..." value="${customSelected ? escapeHTML(st.value) : ''}"
+                        oninput="updateResolverCustom('${key}', this.value)" onfocus="selectResolverField('${key}', this.value, true)"
+                        style="flex:1; border:none; outline:none; font-size:0.85rem; background:transparent;">
+                </div>
+            </div>
+        </div>`;
+    }
+
+    function renderResolverModal() {
+        const st = _resolverState;
+        const body = document.getElementById('resolverBody');
+        if (!body || !st) return;
+        body.innerHTML = `
+            <div style="font-size:0.8rem; color:#64748b; background:#f8fafc; border-radius:8px; padding:10px 14px; margin-bottom:18px;">
+                Merging <strong>${st.contacts.length}</strong> ${st.role} record${st.contacts.length !== 1 ? 's' : ''} covering
+                <strong>${st.contacts.reduce((s, c) => s + c.certs.length, 0)}</strong> certificate(s) total.
+            </div>
+            ${_resolverFieldRow('Name', 'name', 'fa-user', st.nameOpts, true)}
+            ${_resolverFieldRow('Phone', 'phone', 'fa-phone', st.phoneOpts, false)}
+            ${_resolverFieldRow('Email', 'email', 'fa-envelope', st.emailOpts, false)}
+        `;
+    }
+
+    // Repaint just the selection highlight for one field, WITHOUT touching
+    // the <input> node — replacing innerHTML while a text box has focus
+    // (as the old code did on every focus event) destroys and recreates
+    // that input, which instantly kicks the cursor out and makes typing
+    // look completely broken. This only toggles styles/classes.
+    function _repaintResolverField(key) {
+        const st = _resolverState.fields[key];
+        document.querySelectorAll(`.resolver-chip[data-field="${key}"]`).forEach(btn => {
+            const corrupted = btn.getAttribute('data-corrupted') === '1';
+            btn.style.border = corrupted ? '2px solid #fecaca' : '2px solid #e2e8f0';
+            btn.style.background = corrupted ? '#fff5f5' : 'white';
+            btn.style.color = corrupted ? '#dc2626' : '#0f172a';
+            btn.style.fontWeight = '500';
+            const ic = btn.querySelector('.resolver-chip-icon');
+            if (ic) { ic.className = 'far fa-circle resolver-chip-icon'; ic.style.color = '#cbd5e1'; }
+        });
+        const row = document.querySelector(`.resolver-custom-row[data-field="${key}"]`);
+        if (row) {
+            const selected = st.source === 'custom';
+            row.style.border = selected ? '2px solid #2563eb' : '2px solid #e2e8f0';
+            row.style.background = selected ? '#eff6ff' : 'white';
+            const ic = row.querySelector('.resolver-custom-icon');
+            if (ic) { ic.className = (selected ? 'fas fa-check-circle' : 'far fa-circle') + ' resolver-custom-icon'; ic.style.color = selected ? '#2563eb' : '#cbd5e1'; }
+        }
+    }
+
+    function selectResolverField(key, value, fromCustomFocus) {
+        if (!_resolverState) return;
+        if (fromCustomFocus) {
+            // Focusing the "type your own" box — keep whatever's already
+            // typed there, mark it selected, repaint WITHOUT rebuilding the
+            // DOM so keyboard focus is never lost mid-click.
+            _resolverState.fields[key] = { value: value || '', source: 'custom' };
+            _repaintResolverField(key);
+        } else {
+            // A chip was clicked — no input is focused, safe to fully re-render.
+            _resolverState.fields[key] = { value, source: 'picked' };
+            renderResolverModal();
+        }
+    }
+
+    function updateResolverCustom(key, value) {
+        if (!_resolverState) return;
+        _resolverState.fields[key] = { value, source: 'custom' };
+        // State only — no repaint/re-render per keystroke, and the input's
+        // own DOM node is never touched while the person is typing in it.
+    }
+
+    async function confirmResolvedMerge() {
+        if (window._isMerging) return; // ignore double-click while a merge is already running
+        const st = _resolverState;
+        if (!st) return;
+        const name = (st.fields.name.value || '').trim();
+        if (!name) return showToast('Name is required \u2014 pick one or type a value', 'error');
+
+        if (_looksLikePhoneOnly(name) || _looksLikeEmailOnly(name)) {
+            if (!confirm(`"${name}" looks like a phone number or email, not a name. Use it anyway?`)) return;
+        }
+        const phone = (st.fields.phone.value || '').trim();
+        if (phone && _looksLikeSciNotation(phone)) {
+            if (!confirm(`"${phone}" looks like a corrupted phone number (Excel scientific notation), not a real one. Use it anyway?\n\nTip: this usually happens when the CSV was opened and re-saved in Excel before importing \u2014 format that column as Text next time.`)) return;
+        }
+        const email = (st.fields.email.value || '').trim();
+
+        if (!confirm(`Merge ${st.contacts.length} record(s) into:\n\nName: ${name}${phone ? '\nPhone: ' + phone : ''}${email ? '\nEmail: ' + email : ''}\n\nThis will update all their certificates in Supabase.`)) return;
+
+        _setResolverBusy(true, 'Writing to Supabase...');
+        try {
+            await executeGroupMerge(st, { name, phone, email });
+        } finally {
+            _setResolverBusy(false);
+        }
+    }
+
+    async function executeGroupMerge(state, resolved) {
+        if (!isCloud || !cloudDB) { showToast('Cloud connection unavailable \u2014 merge needs Supabase online.', 'error'); return; }
+
+        // Flush queued offline writes first — a stale one holds pre-merge
+        // data and would silently overwrite this merge when it later flushes
         try { await flushOfflineQueue(); } catch(e) {}
 
-        const keeperNorm = _normName(keeper.name);
-        const toUpdate = [];
-        const seen = new Set();
-        const addCert = (cert, field) => {
-            const key = String(cert.id) + '|' + field;
-            if (seen.has(key)) return;
-            seen.add(key);
-            toUpdate.push({ docId: String(cert.id), field, cert });
-        };
+        const nameField = state.role === 'landlord' ? 'landlordName' : 'agentDetails';
+        const nameDbCol = state.role === 'landlord' ? 'landlord_name' : 'agent_details';
 
-        // 1) All certificates belonging to the "loser" contacts — matched with
-        //    normalisation so whitespace/case variants in the DB are included
-        for (const other of others) {
-            const field = other.role === 'landlord' ? 'landlordName' : 'agentDetails';
-            const otherNorm = _normName(other.rawName || other.name);
-            for (const cert of certificates) {
-                if (other.isNameless) {
-                    if (field === 'landlordName' &&
-                        (!cert.landlordName || !cert.landlordName.trim()) &&
-                        ((other.phone && cert.phoneNumber === other.phone) ||
-                         (other.email && cert.email === other.email))) {
-                        addCert(cert, field);
-                    }
-                } else if (_normName(cert[field]) === otherNorm) {
-                    addCert(cert, field);
-                }
-            }
-        }
+        // Union of every certificate ID across every contact in this group —
+        // exactly the set the Directory card showed as "N certs" for them
+        const allIds = Array.from(new Set(
+            state.contacts.flatMap(c => c.certIds.map(String))
+        ));
+        if (!allIds.length) { showToast('No certificates found for this group', 'error'); closeMergeResolver(); return; }
 
-        // 2) The keeper's own certificates whose stored spelling differs
-        //    (e.g. "JOHN SMITH ", "john  smith") — rewrite those too, so after
-        //    this merge every record holds ONE exact canonical name and the
-        //    contact shows as a single person from the next load onwards
-        {
-            const field = keeper.role === 'landlord' ? 'landlordName' : 'agentDetails';
-            for (const cert of certificates) {
-                const raw = cert[field] || '';
-                if (raw !== keeper.name && _normName(raw) === keeperNorm) addCert(cert, field);
-            }
-        }
+        showToast(`Merging ${allIds.length} record(s)...`);
+        console.log(`[MERGE ${APP_BUILD}] name="${resolved.name}" phone="${resolved.phone}" email="${resolved.email}" \u2192 ids:`, allIds);
+        _setResolverBusy(true, `Writing ${allIds.length} record(s) to Supabase...`);
 
-        if (!toUpdate.length) return showToast('No matching certificates found', 'error');
-        if (!confirm(`Merge ${others.map(o => `"${o.name}"`).join(', ')} \u2192 "${keeper.name}"?\n${toUpdate.length} certificate(s) will be updated.`)) return;
-
-        showToast(`Merging ${toUpdate.length} records...`);
-        console.log(`[MERGE ${APP_BUILD}] Writing "${keeper.name}" to ${toUpdate.length} record(s)`, toUpdate.map(i => i.docId));
-
-        // Capture states BEFORE any write, for the audit trail
-        const allAffectedCerts = toUpdate.map(item => {
-            const copy = JSON.parse(JSON.stringify(item.cert));
-            delete copy.searchBlob; delete copy._status;
-            return copy;
-        });
+        // Snapshot BEFORE any write, for the audit trail
+        const beforeSnapshots = certificates
+            .filter(c => allIds.includes(String(c.id)))
+            .map(c => { const copy = { ...c }; delete copy.searchBlob; delete copy._status; return copy; });
 
         const errors = [];
-        const fieldToDbCol = { landlordName: 'landlord_name', agentDetails: 'agent_details' };
+        const writes = [{ col: nameDbCol, val: resolved.name }];
+        if (resolved.phone) writes.push({ col: 'phone_number', val: resolved.phone });
+        if (resolved.email) writes.push({ col: 'email', val: resolved.email });
 
-        // Group by field \u2192 bulk .in() update (1-2 requests instead of N)
-        const byField = {};
-        for (const item of toUpdate) {
-            if (!byField[item.field]) byField[item.field] = [];
-            byField[item.field].push(item);
-        }
-
-        for (const [field, items] of Object.entries(byField)) {
-            const dbCol = fieldToDbCol[field];
-            if (!dbCol) { errors.push(`Unknown field: ${field}`); continue; }
-            const ids = items.map(i => i.docId);
+        for (const w of writes) {
             try {
-                const { error } = await cloudDB
-                    .from('certificates')
-                    .update({ [dbCol]: keeper.name })
-                    .in('id', ids);
+                const { error } = await cloudDB.from('certificates').update({ [w.col]: w.val }).in('id', allIds);
                 if (error) throw error;
             } catch(e) {
-                errors.push(`${field}: ${e.message}`);
-                console.error(`\u274c Bulk merge write failed for ${field}:`, e);
+                errors.push(`${w.col}: ${e.message}`);
+                console.error(`\u274c Merge write failed for ${w.col}:`, e);
             }
         }
 
         // ── READ-BACK VERIFICATION ──────────────────────────────────
-        // Never trust the write response. Supabase (PostgREST) reports success
-        // even when Row Level Security silently blocks an UPDATE — it just
-        // changes 0 rows, and everything reverts on refresh. So re-read the
-        // exact rows fresh from the database and check what is REALLY stored.
-        let saved = 0;
-        let failed = 0;
-        const verifiedIds = new Set();
+        // Supabase (PostgREST) can report success while Row Level Security
+        // silently blocks the write (0 rows changed). Never trust the write
+        // response — re-read the exact rows and check what's really stored.
+        _setResolverBusy(true, 'Confirming the save with Supabase...');
+        let verifiedCount = 0;
         const notPersisted = [];
         let verificationRan = false;
         try {
-            const allIds = toUpdate.map(i => i.docId);
             const { data: freshRows, error: vErr } = await cloudDB
                 .from('certificates')
-                .select('id, landlord_name, agent_details')
+                .select('id, landlord_name, agent_details, phone_number, email')
                 .in('id', allIds);
             if (vErr) throw vErr;
             verificationRan = true;
             const rowById = {};
             (freshRows || []).forEach(r => { rowById[String(r.id)] = r; });
-            for (const item of toUpdate) {
-                const dbRow = rowById[item.docId];
-                const dbVal = dbRow ? (item.field === 'landlordName' ? dbRow.landlord_name : dbRow.agent_details) : undefined;
-                if (dbVal === keeper.name) {
-                    verifiedIds.add(item.docId + '|' + item.field);
-                    saved++;
+            for (const id of allIds) {
+                const row = rowById[id];
+                if (!row) { notPersisted.push({ id, reason: 'row not found' }); continue; }
+                const nameOk  = row[nameDbCol] === resolved.name;
+                const phoneOk = !resolved.phone || row.phone_number === resolved.phone;
+                const emailOk = !resolved.email || row.email === resolved.email;
+                if (nameOk && phoneOk && emailOk) {
+                    verifiedCount++;
                 } else {
-                    failed++;
-                    notPersisted.push({ id: item.docId, field: item.field, stillStored: dbVal });
+                    notPersisted.push({ id, nameOk, phoneOk, emailOk });
                 }
             }
-            console.log(`[MERGE] Verification: ${saved} confirmed in Supabase, ${failed} NOT persisted`, notPersisted);
+            console.log(`[MERGE] Verification: ${verifiedCount}/${allIds.length} confirmed in Supabase`, notPersisted);
         } catch(e) {
             console.warn('[MERGE] Verification read failed (network?):', e);
-            // Can't verify — be honest with the user rather than guessing
-            failed = toUpdate.length;
             errors.push('Could not verify the save (connection issue). Refresh and re-check.');
         }
 
-        // Update in-memory data ONLY for rows the database confirmed
-        for (const item of toUpdate) {
-            if (verifiedIds.has(item.docId + '|' + item.field)) {
-                item.cert[item.field] = keeper.name;
-                updateSearchIndex(item.cert);
+        // Update in-memory data only for rows the database confirmed
+        certificates.forEach(c => {
+            if (!allIds.includes(String(c.id))) return;
+            const wasVerified = !notPersisted.find(n => n.id === String(c.id));
+            if (wasVerified) {
+                c[nameField] = resolved.name;
+                if (resolved.phone) c.phoneNumber = resolved.phone;
+                if (resolved.email) c.email = resolved.email;
+                updateSearchIndex(c);
             }
-        }
+        });
         invalidateContactCache();
 
-        // Remove any queued offline writes for these records — they contain
-        // pre-merge data and would undo the merge next time the queue flushes
+        // Purge any queued offline writes for these records — stale entries
+        // would silently revert this merge on their next flush
         try {
             const qq = JSON.parse(localStorage.getItem(QUEUE_KEY) || '[]');
-            const affectedIdSet = new Set(toUpdate.map(i => i.docId));
+            const affectedIdSet = new Set(allIds);
             const cleaned = qq.filter(op => !(op.type === 'upsert' && op.data && affectedIdSet.has(String(op.data.id))));
             if (cleaned.length !== qq.length) {
                 localStorage.setItem(QUEUE_KEY, JSON.stringify(cleaned));
-                console.warn(`[MERGE] Removed ${qq.length - cleaned.length} stale offline op(s) that would have reverted this merge`);
+                console.warn(`[MERGE] Removed ${qq.length - cleaned.length} stale offline op(s)`);
             }
         } catch(e) {}
 
-        // Audit: MERGE with full state capture for ALL merged records
         auditTrail('MERGE', {
             certificateId: null,
-            previousState: allAffectedCerts.length > 0 ? {
-                _summary: `${allAffectedCerts.length} certificate(s) before merge`,
-                affectedCertificates: allAffectedCerts
-            } : null,
-            newState: {
-                _summary: `Reassigned to "${keeper.name}"`,
-                keeperName: keeper.name,
-                recordsUpdated: saved
-            },
-            metadata: {
-                from: others.map(o => o.name),
-                to: keeper.name,
-                count: saved,
-                affectedIds: toUpdate.map(i => i.docId),
-                fieldsChanged: Object.keys(byField).map(k => ({ field: k, dbColumn: fieldToDbCol[k], count: byField[k].length }))
-            }
+            previousState: beforeSnapshots.length ? { _summary: `${beforeSnapshots.length} certificate(s) before merge`, affectedCertificates: beforeSnapshots } : null,
+            newState: { _summary: `Reassigned to "${resolved.name}"`, name: resolved.name, phone: resolved.phone || null, email: resolved.email || null, recordsUpdated: verifiedCount },
+            metadata: { affectedIds: allIds, count: verifiedCount, resolvedBy: 'manual field picker' }
         });
 
+        const failed = allIds.length - verifiedCount;
         if (failed > 0) {
-            if (verificationRan && notPersisted.length > 0 && errors.length === 0) {
-                // Writes were "accepted" but the database still holds the old
-                // values \u2014 the classic silent Row Level Security block.
+            if (verificationRan && errors.length === 0) {
                 alert(
-                    '\u274c MERGE DID NOT SAVE TO SUPABASE\n\n' +
-                    `The app sent the update, Supabase reported no error, but when read back ${notPersisted.length} record(s) still hold the OLD name.\n\n` +
-                    'This is almost always Row Level Security silently blocking UPDATE on the "certificates" table (reading works, so SELECT is allowed, but UPDATE has no policy).\n\n' +
+                    '\u274c MERGE DID NOT FULLY SAVE TO SUPABASE\n\n' +
+                    `${verifiedCount}/${allIds.length} record(s) confirmed. ${failed} still hold OLD values after read-back.\n\n` +
+                    'This is almost always Row Level Security silently blocking UPDATE on the "certificates" table (reading works, but there is no UPDATE policy).\n\n' +
                     'FIX \u2014 run this ONCE in Supabase \u2192 SQL Editor:\n\n' +
                     'create policy "Signed-in users can update certificates"\n' +
                     'on certificates for update to authenticated\n' +
                     'using (true) with check (true);\n\n' +
-                    'Then retry the merge. (Also check the F12 console for the build number \u2014 if it is not "' + APP_BUILD + '", your browser is running an old cached copy: press Ctrl+Shift+R.)'
+                    'Then retry the merge.'
                 );
             } else {
-                alert(`\u274c ${failed} save(s) failed:\n${errors.join('\n')}\n\nCheck the F12 console for details.`);
+                alert(`\u274c ${failed} record(s) failed to save:\n${errors.join('\n')}\n\nCheck the F12 console for details.`);
             }
         } else {
-            showToast(`\u2705 Merged into "${keeper.name}" \u2014 ${saved} records verified in Supabase`, 'success');
+            showToast(`\u2705 Merged into "${resolved.name}" \u2014 ${verifiedCount} record(s) verified in Supabase`, 'success');
         }
 
-        // ── Always reload so the UI shows the true database state ──
+        // Keep the modal open (with the busy spinner) through the reload and
+        // rescan below — closing it here, right before the heaviest part,
+        // is exactly why this used to look "stuck": the spinner vanished
+        // just as the real freeze began, on the very step that takes the
+        // longest for a large certificate list.
+        _setResolverBusy(true, 'Reloading data from Supabase...');
+
+        // Reload from Supabase — the source of truth — so the screen always
+        // reflects what's really saved, success or partial failure alike
         await loadCertificatesFromCloud();
 
-        // Rebuild duplicate groups from fresh in-memory data
+        _setResolverBusy(true, 'Rescanning for duplicates \u2014 this can take a moment on a large list...');
+        // Yield one tick so the browser actually paints the status line above
+        // before the rescan's synchronous nested loop blocks the main thread.
+        // Without this, typing anywhere during a big rescan appeared "stuck"
+        // because the tab was frozen with no visible sign of why.
+        await new Promise(r => setTimeout(r, 20));
+
         const freshGroups = findDuplicateGroups ? findDuplicateGroups() : [];
         window._dupGroups = freshGroups;
 
@@ -4954,12 +5104,11 @@ using ((auth.jwt() ->> 'email') = 'gbmandeep@hotmail.com');</pre>
         const tabBadge = document.getElementById('dupTabBadge');
         if (badge)    { badge.style.display    = remaining ? 'flex'        : 'none'; badge.innerText    = remaining; }
         if (tabBadge) { tabBadge.style.display = remaining ? 'inline-flex' : 'none'; tabBadge.innerText = remaining; }
-
         if (typeof renderDuplicateResults === 'function') renderDuplicateResults(freshGroups);
         renderDirectory();
-        if (failed === 0) showToast(`\u2705 Merge complete \u2014 ${saved} records confirmed in Supabase`, 'success');
-    }
 
+        closeMergeResolver();
+    }
 
 
     function getMissingFields(c) {
@@ -8650,6 +8799,31 @@ using ((auth.jwt() ->> 'email') = 'gbmandeep@hotmail.com');</pre>
 </script>
 <div id="toast-container"></div>
 <!-- MERGE MODAL -->
+<!-- ═══════════════════════════════════════════════════════
+     CONTACT MERGE RESOLVER — side-by-side field picker
+     ═══════════════════════════════════════════════════════ -->
+<div id="resolverOverlay" style="display:none; position:fixed; inset:0; background:rgba(15,23,42,0.75); z-index:4500; align-items:center; justify-content:center; backdrop-filter:blur(4px); padding:20px;" onclick="if(event.target===this && !window._isMerging) closeMergeResolver()">
+    <div style="background:white; border-radius:16px; width:100%; max-width:760px; max-height:88vh; overflow-y:auto; box-shadow:0 20px 60px rgba(0,0,0,0.35);">
+        <div style="padding:24px 28px 18px; border-bottom:1px solid #f1f5f9; position:sticky; top:0; background:white; border-radius:16px 16px 0 0; z-index:2;">
+            <div style="display:flex; align-items:center; justify-content:between; gap:12px;">
+                <div style="flex:1;">
+                    <h3 style="margin:0 0 4px; font-size:1.1rem; color:#0f172a; font-weight:800;"><i class="fas fa-object-ungroup" style="color:#2563eb; margin-right:8px;"></i>Choose the correct details</h3>
+                    <p style="margin:0; font-size:0.82rem; color:#94a3b8;">Pick which value to keep for each field. All certificates in this group will use your choices — <strong>Name is required</strong>.</p>
+                </div>
+                <button id="resolverCloseX" onclick="closeMergeResolver()" style="background:none; border:none; font-size:1.3rem; color:#94a3b8; cursor:pointer; padding:4px 8px; line-height:1;">&times;</button>
+            </div>
+        </div>
+        <div id="resolverBody" style="padding:24px 28px;"></div>
+        <div id="resolverStatusLine" style="display:none; padding:0 28px 4px; font-size:0.82rem; color:#2563eb; font-weight:600; align-items:center; gap:8px;">
+            <i class="fas fa-circle-notch fa-spin"></i> <span id="resolverStatusText">Working...</span>
+        </div>
+        <div style="padding:16px 28px 24px; border-top:1px solid #f1f5f9; display:flex; gap:10px; justify-content:flex-end; position:sticky; bottom:0; background:white; border-radius:0 0 16px 16px;">
+            <button id="resolverCancelBtn" onclick="closeMergeResolver()" style="padding:11px 20px; border-radius:8px; border:1px solid #e2e8f0; background:white; color:#475569; font-weight:700; font-size:0.86rem; cursor:pointer;">Cancel</button>
+            <button id="resolverMergeBtn" onclick="confirmResolvedMerge()" style="padding:11px 22px; border-radius:8px; border:none; background:#2563eb; color:white; font-weight:700; font-size:0.86rem; cursor:pointer; display:flex; align-items:center; gap:8px;"><i class="fas fa-check"></i> Merge with these details</button>
+        </div>
+    </div>
+</div>
+
 <div id="mergeOverlay" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.7); z-index:4000; align-items:center; justify-content:center; backdrop-filter:blur(4px);">
     <div style="background:white; border-radius:16px; width:480px; padding:32px; box-shadow:0 20px 60px rgba(0,0,0,0.3);">
         <h3 id="mergeTitle" style="margin:0 0 6px; font-size:1.15rem; color:#0f172a;"></h3>

@@ -441,7 +441,6 @@
         .wave-chart-container { position: relative; overflow: hidden; }
 
         /* ── DAYS COLOUR BANDING ── */
-        .days-badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 0.72rem; font-weight: 800; }
         .days-critical { background: #fee2e2; color: #b91c1c; }
         .days-warning  { background: #fef3c7; color: #92400e; }
         .days-ok       { background: #dcfce7; color: #15803d; }
@@ -1010,8 +1009,6 @@
         }
         .signout-btn:hover { background: #fee2e2; border-color: #fecaca; color: #b91c1c; }
         /* ── SKELETON LOADING ── */
-        .sk { background: linear-gradient(90deg, #f1f5f9 25%, #e2e8f0 50%, #f1f5f9 75%); background-size: 200% 100%; animation: sk-shimmer 1.4s infinite; border-radius: 6px; }
-        @keyframes sk-shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
         .sk-card { background: white; border-radius: 12px; border: 1px solid #e2e8f0; padding: 20px; display: flex; flex-direction: column; gap: 10px; }
         #loadingOverlay { position: fixed; inset: 0; background: #f8fafc; z-index: 9999; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 24px; transition: opacity 0.3s; }
         #loadingOverlay.fade-out { opacity: 0; pointer-events: none; }
@@ -1515,7 +1512,7 @@
         <div class="nav-item" id="nav-incomplete" onclick="showSection('incomplete')" style="position:relative;">
             <i class="fas fa-exclamation-circle" style="color:#f59e0b;"></i>
             <span>Incomplete</span>
-            <span id="incompleteBadge" style="display:none; position:absolute; right:12px; top:50%; transform:translateY(-50%); background:#ef4444; color:white; font-size:0.65rem; font-weight:800; min-width:20px; height:20px; border-radius:10px; display:flex; align-items:center; justify-content:center; padding:0 5px;">0</span>
+            <span id="incompleteBadge" style="display:none; position:absolute; right:12px; top:50%; transform:translateY(-50%); background:#ef4444; color:white; font-size:0.65rem; font-weight:800; min-width:20px; height:20px; border-radius:10px; align-items:center; justify-content:center; padding:0 5px;">0</span>
         </div>
         <div class="nav-item" id="nav-reminders" onclick="showSection('reminders')"><i class="fas fa-envelope-open-text"></i> <span>Bulk Reminders</span></div>
         <div class="nav-item" id="nav-stats" onclick="showSection('stats')"><i class="fas fa-chart-bar"></i> <span>Statistics</span></div>
@@ -3039,15 +3036,7 @@ using ((auth.jwt() ->> 'email') = 'gbmandeep@hotmail.com');</pre>
             console.warn(`[auditTrail] Invalid action type: "${actionType}". Skipping.`);
             return;
         }
-        let changedBy = 'system';
-        try {
-            if (typeof _currentUser !== 'undefined' && _currentUser?.email) {
-                changedBy = _currentUser.email;
-            } else if (typeof cloudDB !== 'undefined' && cloudDB?.auth?.getUser) {
-                const { data: { user } } = await cloudDB.auth.getUser();
-                if (user?.email) changedBy = user.email;
-            }
-        } catch(e) { }
+        const changedBy = (typeof _currentUser !== 'undefined' && _currentUser?.email) ? _currentUser.email : 'system';
         const entry = {
             certificate_id: certificateId,
             action_type: actionType,
@@ -3384,7 +3373,13 @@ using ((auth.jwt() ->> 'email') = 'gbmandeep@hotmail.com');</pre>
             const previousState = certToDelete ? JSON.parse(JSON.stringify(certToDelete)) : null;
             if (previousState) { delete previousState.searchBlob; delete previousState._status; }
             certificates = certificates.filter(c => c.id !== id);
-            cloudDB.from('certificates').delete().eq('id', id).then(({ error }) => { if(error) console.error('Delete error:', error); });
+            const { error: deleteError } = await cloudDB.from('certificates').delete().eq('id', id);
+            if (deleteError) {
+                if (certToDelete) certificates.push(certToDelete);
+                showToast('Delete failed: ' + deleteError.message, 'error');
+                displayCertificates();
+                return;
+            }
             auditTrail('DELETE', {
                 certificateId: id,
                 previousState: previousState,
@@ -3454,7 +3449,6 @@ using ((auth.jwt() ->> 'email') = 'gbmandeep@hotmail.com');</pre>
         }
         if (id === 'audit') {
             showSkeletonAudit();
-            if (isCloud) setTimeout(loadAuditLog, 300);
             setTimeout(function() {
                 var body = document.getElementById('auditLogBody');
                 if (body && body.querySelector('.sk')) {
@@ -3469,7 +3463,8 @@ using ((auth.jwt() ->> 'email') = 'gbmandeep@hotmail.com');</pre>
         document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
         const content = document.getElementById(id + '-content'); if(content) content.classList.add('active');
         const nav = document.getElementById('nav-' + id); if(nav) nav.classList.add('active');
-        document.getElementById('pageTitle').innerText = id.toUpperCase();
+        const _sectionLabels = { dashboard: 'Dashboard', manage: 'Certificates', add: 'Add Certificate', directory: 'Directory', incomplete: 'Incomplete', reminders: 'Bulk Reminders', stats: 'Statistics', map: 'UK Heat Map', audit: 'Audit Log', settings: 'Settings' };
+        document.getElementById('pageTitle').innerText = _sectionLabels[id] || id.toUpperCase();
         
         localStorage.setItem('lastView', id);
         if(id === 'dashboard') { renderDashboard(); renderCalendarHeatmap(); }
@@ -5511,7 +5506,6 @@ using ((auth.jwt() ->> 'email') = 'gbmandeep@hotmail.com');</pre>
     function setReminderMode(mode) {
         currentReminderMode = mode;
         document.querySelectorAll('.reminder-mode-btn').forEach(b => b.classList.remove('active'));
-        document.getElementById(mode === 'email' ? 'btnModeEmail' : 'btnModeEmail').classList.add('active');
         document.getElementById('btnModeWhatsapp').classList.toggle('active', mode === 'whatsapp');
         document.getElementById('btnModeEmail').classList.toggle('active', mode === 'email');
         document.getElementById('messageContainer').style.display = 'none'; 
@@ -5765,33 +5759,6 @@ using ((auth.jwt() ->> 'email') = 'gbmandeep@hotmail.com');</pre>
 
     var _pcDebounce = null;
     var _pcValid = false;
-
-    function onPostcodeInput() {
-        clearTimeout(_pcDebounce);
-        var el = document.getElementById('postcodeInput');
-        var val = el ? el.value.trim() : '';
-        var icon = document.getElementById('pcValidIcon');
-        var status = document.getElementById('postcodeStatus');
-
-        // Reset state
-        _pcValid = false;
-        if (icon) { icon.style.display = 'none'; }
-        if (el) { el.style.borderColor = '#e2e8f0'; }
-
-        if (val.length < 2) {
-            if (status) status.innerHTML = '<i class="fas fa-info-circle"></i> Enter postcode first, then type the street address. Both will be combined on save.';
-            return;
-        }
-
-        // Looks like a complete postcode (e.g. SW1A 1AA or SW1A1AA)
-        var looksComplete = /^[A-Z]{1,2}\d{1,2}[A-Z]?\s*\d[A-Z]{2}$/.test(val);
-        if (looksComplete) {
-            if (status) status.innerHTML = '<i class="fas fa-spinner fa-spin" style="color:#6366f1;"></i> Validating...';
-            _pcDebounce = setTimeout(function() { validatePostcode(val); }, 300);
-        } else {
-            if (status) status.innerHTML = '<i class="fas fa-keyboard" style="color:#94a3b8;"></i> Keep typing your postcode...';
-        }
-    }
 
     async function validatePostcode(pc) {
         var el = document.getElementById('postcodeInput');

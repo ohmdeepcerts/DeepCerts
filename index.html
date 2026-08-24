@@ -6586,27 +6586,29 @@ using ((auth.jwt() ->> 'email') = 'gbmandeep@hotmail.com');</pre>
             });
         }
 
-        // Nominatim UK address search — debounced, only when looks like a street address (5+ chars, starts with digit or letter)
-        if (val.length >= 5) {
-            _addrNomTimer = setTimeout(function() { _searchNominatimAddress(val); }, 500);
+        // Photon (Komoot) UK address autocomplete — debounced from 3 chars
+        if (val.length >= 3) {
+            _addrNomTimer = setTimeout(function() { _searchPhotonAddress(val); }, 300);
         }
     }
 
-    async function _searchNominatimAddress(query) {
+    async function _searchPhotonAddress(query) {
         try {
             var resp = await fetch(
-                'https://nominatim.openstreetmap.org/search?q=' + encodeURIComponent(query) +
-                '&countrycodes=gb&format=json&addressdetails=1&limit=7',
+                'https://photon.komoot.io/api/?q=' + encodeURIComponent(query) +
+                '&countrycodes=gb&limit=8&lang=en',
                 { headers: { 'Accept-Language': 'en-GB,en' } }
             );
             if (!resp.ok) return;
-            var results = await resp.json();
-            // Only use results with a road + postcode
-            var hits = results.filter(function(r){ return r.address && r.address.postcode && (r.address.road || r.address.pedestrian || r.address.footway); }).slice(0, 5);
-            if (!hits.length) return;
+            var data = await resp.json();
+            var features = (data.features || []).filter(function(f) {
+                var p = f.properties || {};
+                // Must have a street and a postcode to be useful
+                return p.postcode && (p.street || p.name);
+            }).slice(0, 6);
+            if (!features.length) return;
 
             var list = document.getElementById('addressSuggestions');
-            // Remove stale Nominatim rows then re-add
             list.querySelectorAll('.nom-row').forEach(function(n){ n.remove(); });
 
             var hdr2 = document.createElement('li');
@@ -6615,41 +6617,33 @@ using ((auth.jwt() ->> 'email') = 'gbmandeep@hotmail.com');</pre>
             hdr2.style.cssText = 'font-size:0.68rem;font-weight:700;color:#94a3b8;padding:6px 12px 2px;pointer-events:none;text-transform:uppercase;letter-spacing:0.05em;border-top:1px solid #f1f5f9;margin-top:2px;';
             list.appendChild(hdr2);
 
-            hits.forEach(function(r) {
-                var a = r.address || {};
-                var houseNum = a.house_number || '';
-                var road = titleCaseName(a.road || a.pedestrian || a.footway || a.path || '');
-                var suburb = a.suburb || a.neighbourhood || '';
-                if (/^(london borough|city of |metropolitan borough|county of )/i.test(suburb)) suburb = '';
-                var town = a.town || a.city || a.village || '';
-                if (/^(london borough|city of |metropolitan borough|county of )/i.test(town)) town = '';
-                var displayTown = titleCaseName(suburb || town);
-                var borough = '';
-                if (a.city_district) {
-                    borough = a.city_district.replace(/^(London Borough of |Metropolitan Borough of |City of |Borough of )/i, '').trim();
-                    if (/^(Greater London|England|UK|United Kingdom)/i.test(borough)) borough = '';
-                } else if (a.county && !/^(Greater London|England|UK|United Kingdom)/i.test(a.county)) {
-                    borough = titleCaseName(a.county);
-                }
-                var postcode = (a.postcode || '').toUpperCase();
+            features.forEach(function(f) {
+                var p = f.properties || {};
+                var houseNum = p.housenumber || '';
+                var street   = titleCaseName(p.street || p.name || '');
+                var city     = titleCaseName(p.city || p.town || p.village || '');
+                var district = titleCaseName(p.district || p.county || '');
+                // Strip "London Borough of …" prefix if present
+                district = district.replace(/^(London Borough of |Metropolitan Borough of |City of |Borough of )/i, '').trim();
+                if (/^(Greater London|England|Uk|United Kingdom)/i.test(district)) district = '';
+                var postcode = (p.postcode || '').toUpperCase();
 
-                // Build full formatted address for the field
                 var addrParts = [];
-                if (houseNum && road) addrParts.push(houseNum + ' ' + road);
-                else if (road) addrParts.push(road);
-                if (displayTown) addrParts.push(displayTown);
-                if (borough && borough.toLowerCase() !== displayTown.toLowerCase()) addrParts.push(titleCaseName(borough));
-                if (postcode) addrParts.push(postcode);
+                if (houseNum && street) addrParts.push(houseNum + ' ' + street);
+                else if (street)        addrParts.push(street);
+                if (city)               addrParts.push(city);
+                if (district && district.toLowerCase() !== city.toLowerCase()) addrParts.push(district);
+                if (postcode)           addrParts.push(postcode);
                 var fullAddr = addrParts.join(', ');
-                if (!fullAddr) return;
+                if (!fullAddr || !postcode) return;
 
                 var li = document.createElement('li');
                 li.className = 'nom-row';
-                li.innerHTML =
-                    '<i class="fas fa-map-marker-alt" style="color:#ef4444;margin-right:6px;font-size:0.75rem;"></i>' +
-                    '<span>' + escapeHTML(fullAddr) + '</span>' +
-                    (postcode ? '<span style="margin-left:auto;font-size:0.7rem;color:#6366f1;font-weight:700;padding-left:8px;white-space:nowrap;">' + postcode + '</span>' : '');
                 li.style.cssText = 'display:flex;align-items:center;gap:0;';
+                li.innerHTML =
+                    '<i class="fas fa-map-marker-alt" style="color:#ef4444;margin-right:6px;font-size:0.75rem;flex-shrink:0;"></i>' +
+                    '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHTML(fullAddr) + '</span>' +
+                    '<span style="margin-left:6px;font-size:0.7rem;color:#6366f1;font-weight:700;white-space:nowrap;">' + postcode + '</span>';
                 li.onclick = function() {
                     var addrEl = document.getElementById('propertyAddress');
                     if (addrEl) addrEl.value = fullAddr;

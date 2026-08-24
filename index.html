@@ -6594,6 +6594,9 @@ using ((auth.jwt() ->> 'email') = 'gbmandeep@hotmail.com');</pre>
 
     async function _searchPhotonAddress(query) {
         try {
+            // Extract house/flat number from what user typed (e.g. "4" from "4 kelsie way" or "130" from "130 woodlands")
+            var typedHouseNum = (query.match(/^\s*(\d+[a-zA-Z]?)\b/) || [])[1] || '';
+
             var resp = await fetch(
                 'https://photon.komoot.io/api/?q=' + encodeURIComponent(query) +
                 '&countrycodes=gb&limit=8&lang=en',
@@ -6603,7 +6606,6 @@ using ((auth.jwt() ->> 'email') = 'gbmandeep@hotmail.com');</pre>
             var data = await resp.json();
             var features = (data.features || []).filter(function(f) {
                 var p = f.properties || {};
-                // Must have a street and a postcode to be useful
                 return p.postcode && (p.street || p.name);
             }).slice(0, 6);
             if (!features.length) return;
@@ -6617,25 +6619,33 @@ using ((auth.jwt() ->> 'email') = 'gbmandeep@hotmail.com');</pre>
             hdr2.style.cssText = 'font-size:0.68rem;font-weight:700;color:#94a3b8;padding:6px 12px 2px;pointer-events:none;text-transform:uppercase;letter-spacing:0.05em;border-top:1px solid #f1f5f9;margin-top:2px;';
             list.appendChild(hdr2);
 
+            // Deduplicate by postcode+street so we don't show the same road multiple times
+            var seen = new Set();
             features.forEach(function(f) {
                 var p = f.properties || {};
-                var houseNum = p.housenumber || '';
+                var photonHouseNum = p.housenumber || '';
                 var street   = titleCaseName(p.street || p.name || '');
                 var city     = titleCaseName(p.city || p.town || p.village || '');
                 var district = titleCaseName(p.district || p.county || '');
-                // Strip "London Borough of …" prefix if present
                 district = district.replace(/^(London Borough of |Metropolitan Borough of |City of |Borough of )/i, '').trim();
                 if (/^(Greater London|England|Uk|United Kingdom)/i.test(district)) district = '';
                 var postcode = (p.postcode || '').toUpperCase();
+                if (!postcode || !street) return;
+
+                // Prefer typed house number over Photon's (Photon may return road-level result without one)
+                var useHouseNum = photonHouseNum || typedHouseNum;
+
+                var dedupeKey = useHouseNum + '|' + street + '|' + postcode;
+                if (seen.has(dedupeKey)) return;
+                seen.add(dedupeKey);
 
                 var addrParts = [];
-                if (houseNum && street) addrParts.push(houseNum + ' ' + street);
-                else if (street)        addrParts.push(street);
-                if (city)               addrParts.push(city);
+                if (useHouseNum) addrParts.push(useHouseNum + ' ' + street);
+                else             addrParts.push(street);
+                if (city)        addrParts.push(city);
                 if (district && district.toLowerCase() !== city.toLowerCase()) addrParts.push(district);
-                if (postcode)           addrParts.push(postcode);
+                if (postcode)    addrParts.push(postcode);
                 var fullAddr = addrParts.join(', ');
-                if (!fullAddr || !postcode) return;
 
                 var li = document.createElement('li');
                 li.className = 'nom-row';
@@ -6645,6 +6655,7 @@ using ((auth.jwt() ->> 'email') = 'gbmandeep@hotmail.com');</pre>
                     '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHTML(fullAddr) + '</span>' +
                     '<span style="margin-left:6px;font-size:0.7rem;color:#6366f1;font-weight:700;white-space:nowrap;">' + postcode + '</span>';
                 li.onclick = function() {
+                    clearTimeout(_addrNomTimer);
                     var addrEl = document.getElementById('propertyAddress');
                     if (addrEl) addrEl.value = fullAddr;
                     if (postcode) {

@@ -197,6 +197,9 @@
         if (townEl) { townEl.value = ''; townEl.classList.remove('filled-auto'); }
         if (countyEl) { countyEl.value = ''; countyEl.classList.remove('filled-auto'); }
         document.getElementById('zippoFields').style.display = 'none';
+        var roadSel = document.getElementById('roadSelector');
+        if (roadSel) { roadSel.style.display = 'none'; roadSel.innerHTML = ''; }
+        _lastPostTown = ''; _lastPostCounty = ''; _lastValidPostcode = '';
         var checkIcon = document.getElementById('pcCheckIcon');
         var warnIcon = document.getElementById('pcWarnIcon');
         if (checkIcon) checkIcon.style.display = 'none';
@@ -1704,33 +1707,34 @@
                     <div class="input-group">
                         <label>Property Address</label>
                         <div style="display:flex; gap:8px; margin-bottom:8px; align-items:center;">
-                            <div style="position:relative; flex:0 0 160px;">
+                            <div style="position:relative; flex:1;">
+                                <i class="fas fa-map-marker-alt input-icon"></i>
+                                <input type="text" id="propertyAddress" onpaste="setTimeout(()=>parseAndFillAddress(this.value),10)" class="input-with-icon"
+                                    style="width:100%; padding:12px;"
+                                    placeholder="Road, Town, County auto-fills — then type door/flat no. at the start..."
+                                    oninput="updateAddressSuggestions()"
+                                    onblur="autoCorrectAddress()"
+                                    autocomplete="off">
+                                <ul id="addressSuggestions" class="suggestions-dropdown"></ul>
+                            </div>
+                            <div style="position:relative; flex:0 0 150px;">
                                 <i class="fas fa-search-location" style="position:absolute; left:10px; top:50%; transform:translateY(-50%); color:#94a3b8; font-size:0.85rem; pointer-events:none;"></i>
                                 <input type="text" id="postcodeInput"
                                     style="width:100%; padding:10px 10px 10px 32px; border-radius:8px; border:1px solid #e2e8f0; font-size:0.88rem; text-transform:uppercase; letter-spacing:1px; font-weight:600;"
                                     placeholder="Postcode" maxlength="9"
                                     oninput="this.value=this.value.toUpperCase(); onPostcodeInput()"
                                     autocomplete="off">
-                                <!-- Postcode status indicators (spinner, check, warning) -->
                                 <span id="pcStatusWrap" class="pc-spinner-wrap">
                                     <span id="pcSpinner" class="pc-spinner"></span>
                                     <i id="pcCheckIcon" class="fas fa-check-circle pc-check-icon" style="display:none;"></i>
                                     <i id="pcWarnIcon" class="fas fa-exclamation-triangle pc-warn-icon" style="display:none;"></i>
                                 </span>
                             </div>
-                            <div style="position:relative; flex:1;">
-                                <i class="fas fa-map-marker-alt input-icon"></i>
-                                <input type="text" id="propertyAddress" onpaste="setTimeout(()=>parseAndFillAddress(this.value),10)" class="input-with-icon"
-                                    style="width:100%; padding:12px;"
-                                    placeholder="← Type door/flat no. here after postcode validates..."
-                                    oninput="updateAddressSuggestions()"
-                                    onblur="autoCorrectAddress()"
-                                    autocomplete="off">
-                                <ul id="addressSuggestions" class="suggestions-dropdown"></ul>
-                            </div>
                         </div>
+                        <!-- Road name selector — shown when postcode covers multiple streets -->
+                        <div id="roadSelector" style="display:none; flex-wrap:wrap; gap:6px; margin-bottom:6px; align-items:center;"></div>
                         <div id="postcodeStatus" style="font-size:0.75rem; color:#94a3b8; min-height:16px;">
-                            <i class="fas fa-info-circle"></i> Enter a UK postcode — the address field fills automatically. Then type the door/flat number at the start, or edit the whole address freely.
+                            <i class="fas fa-info-circle"></i> Enter a UK postcode on the right — road, town and county auto-fill. Then type the door/flat number at the very start.
                         </div>
 
                         <!-- ZIPPOPOTAM: Town/City + County/State auto-filled fields -->
@@ -5759,6 +5763,30 @@ using ((auth.jwt() ->> 'email') = 'gbmandeep@hotmail.com');</pre>
 
     var _pcDebounce = null;
     var _pcValid = false;
+    var _lastPostTown = '', _lastPostCounty = '', _lastValidPostcode = '';
+
+    function selectRoad(road) {
+        var addrEl = document.getElementById('propertyAddress');
+        if (!addrEl) return;
+        var parts = [];
+        if (road)               parts.push(road);
+        if (_lastPostTown)      parts.push(_lastPostTown);
+        if (_lastPostCounty)    parts.push(_lastPostCounty);
+        if (_lastValidPostcode) parts.push(_lastValidPostcode);
+        addrEl.value = parts.join(', ');
+        addrEl.focus();
+        addrEl.setSelectionRange(0, 0);
+        // Highlight active chip and update status hint
+        var roadSel = document.getElementById('roadSelector');
+        if (roadSel) {
+            roadSel.querySelectorAll('button').forEach(function(btn) {
+                var isSelected = btn.textContent.trim() === road;
+                btn.style.background = isSelected ? '#4338ca' : '#eef2ff';
+                btn.style.color      = isSelected ? '#fff'    : '#4338ca';
+                btn.style.borderColor = isSelected ? '#4338ca' : '#c7d2fe';
+            });
+        }
+    }
 
     async function validatePostcode(pc) {
         var el = document.getElementById('postcodeInput');
@@ -5795,55 +5823,94 @@ using ((auth.jwt() ->> 'email') = 'gbmandeep@hotmail.com');</pre>
                 if (countyEl) { countyEl.value = postCounty; countyEl.classList.add('filled-auto'); }
                 if (zippoDiv) zippoDiv.style.display = 'grid';
 
-                // Auto-fill address field only if it's empty or still just a postcode
+                // Cache town/county/postcode for selectRoad() to read
+                _lastPostTown = postTown; _lastPostCounty = postCounty; _lastValidPostcode = p.postcode;
+
                 var current = addrEl ? addrEl.value.trim() : '';
                 var isEmpty = !current || current.toUpperCase() === p.postcode;
 
-                // Show interim status while we look up the road name
                 if (status) status.innerHTML =
-                    '<i class="fas fa-spinner fa-spin" style="color:#6366f1;"></i> ' +
-                    'Looking up road name...';
+                    '<i class="fas fa-spinner fa-spin" style="color:#6366f1;"></i> Looking up road names...';
 
-                // Nominatim reverse geocode — uses postcodes.io lat/lng to find the road name
-                // Free, no API key needed. Rate limit: 1 req/sec (fine for single lookups)
-                var roadName = '';
-                if (p.latitude && p.longitude) {
+                // Step 1: Nominatim SEARCH — returns all OSM objects matching this postcode,
+                // letting us extract every unique road name covered by it.
+                var roads = [];
+                try {
+                    var nomResp = await fetch(
+                        'https://nominatim.openstreetmap.org/search?q=' + encodeURIComponent(p.postcode) +
+                        '&countrycodes=gb&format=json&addressdetails=1&limit=50',
+                        { headers: { 'Accept-Language': 'en-GB,en' } }
+                    );
+                    if (nomResp.ok) {
+                        var nomResults = await nomResp.json();
+                        var roadSet = new Set();
+                        nomResults.forEach(function(r) {
+                            if (r.address && r.address.road) roadSet.add(titleCaseName(r.address.road));
+                        });
+                        roads = Array.from(roadSet).sort();
+                    }
+                } catch(e) {}
+
+                // Step 2: Fallback — reverse geocode the centroid if search found no roads
+                if (roads.length === 0 && p.latitude && p.longitude) {
                     try {
-                        var nomResp = await fetch(
+                        var revResp = await fetch(
                             'https://nominatim.openstreetmap.org/reverse?format=json&lat=' +
                             p.latitude + '&lon=' + p.longitude + '&zoom=17&addressdetails=1',
                             { headers: { 'Accept-Language': 'en-GB,en' } }
                         );
-                        if (nomResp.ok) {
-                            var nomData = await nomResp.json();
-                            roadName = nomData.address && nomData.address.road ? titleCaseName(nomData.address.road) : '';
+                        if (revResp.ok) {
+                            var revData = await revResp.json();
+                            if (revData.address && revData.address.road)
+                                roads = [titleCaseName(revData.address.road)];
                         }
-                    } catch(e) { /* Nominatim unavailable — carry on without road name */ }
+                    } catch(e) {}
                 }
 
+                // Build and show the road selector chips (hidden if only one road)
+                var roadSel = document.getElementById('roadSelector');
+                if (roadSel) { roadSel.style.display = 'none'; roadSel.innerHTML = ''; }
+
+                if (roads.length > 1 && roadSel) {
+                    roadSel.style.display = 'flex';
+                    roadSel.innerHTML =
+                        '<span style="font-size:0.72rem;color:#6b7280;font-weight:700;white-space:nowrap;padding:2px 0;">' +
+                        '<i class="fas fa-road" style="margin-right:4px;"></i>Select road:</span>' +
+                        roads.map(function(r) {
+                            return '<button type="button" onclick="selectRoad(' + JSON.stringify(r) + ')" ' +
+                                'style="padding:4px 11px;border-radius:20px;border:1px solid #c7d2fe;background:#eef2ff;' +
+                                'color:#4338ca;font-size:0.75rem;font-weight:700;cursor:pointer;white-space:nowrap;' +
+                                'transition:all 0.15s;" onmouseover="this.style.background=\'#4338ca\';this.style.color=\'#fff\'" ' +
+                                'onmouseout="this.style.background=\'#eef2ff\';this.style.color=\'#4338ca\'">' +
+                                escapeHTML(r) + '</button>';
+                        }).join('');
+                }
+
+                // Auto-fill the address field with the first road (or just town/postcode if no roads)
                 if (addrEl && isEmpty) {
                     var parts = [];
-                    if (roadName) parts.push(roadName);
-                    if (postTown) parts.push(postTown);
+                    if (roads.length > 0) parts.push(roads[0]);
+                    if (postTown)   parts.push(postTown);
                     if (postCounty) parts.push(postCounty);
                     parts.push(p.postcode);
                     addrEl.value = parts.join(', ');
-                    // Position cursor at start so user types house/flat number in front
                     addrEl.focus();
                     addrEl.setSelectionRange(0, 0);
                 }
 
-                var hintText = roadName
-                    ? '<i class="fas fa-pencil-alt"></i> Type the house/flat number at the start'
-                    : '<i class="fas fa-pencil-alt"></i> Type the full street address at the start';
+                var hintText = roads.length > 1
+                    ? '<i class="fas fa-hand-pointer"></i> ' + roads.length + ' roads found — select above, then type the house number at the start'
+                    : roads.length === 1
+                        ? '<i class="fas fa-pencil-alt"></i> Type the house/flat number at the very start'
+                        : '<i class="fas fa-pencil-alt"></i> Road not found — type the full street address at the start';
 
                 if (status) status.innerHTML =
                     '<i class="fas fa-check-circle" style="color:#10b981;"></i> ' +
                     '<strong style="color:#10b981;">' + p.postcode + '</strong>' +
-                    (roadName   ? ' — ' + escapeHTML(roadName)               : '') +
-                    (postTown   ? ', '  + escapeHTML(postTown)               : '') +
-                    (postCounty ? ', '  + escapeHTML(postCounty)             : '') +
-                    ' &nbsp;·&nbsp; <span style="color:#6366f1; font-weight:600;">' + hintText + '</span>';
+                    (roads.length > 0 ? ' — ' + escapeHTML(roads[0]) : '') +
+                    (postTown         ? ', '   + escapeHTML(postTown) : '') +
+                    (postCounty       ? ', '   + escapeHTML(postCounty) : '') +
+                    ' &nbsp;·&nbsp; <span style="color:#6366f1;font-weight:600;">' + hintText + '</span>';
             } else {
                 _pcValid = false;
                 if (el) el.style.borderColor = '#ef4444';

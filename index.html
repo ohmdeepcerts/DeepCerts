@@ -5862,6 +5862,7 @@ using ((auth.jwt() ->> 'email') = 'gbmandeep@hotmail.com');</pre>
     var _pcValid = false;
     var _lastPostTown = '', _lastPostCounty = '', _lastValidPostcode = '';
     var _geminiApiKey = localStorage.getItem('deepcerts_gemini_key') || '';
+    var _addrNomTimer = null;
 
     function selectRoad(road) {
         var addrEl = document.getElementById('propertyAddress');
@@ -6561,9 +6562,110 @@ using ((auth.jwt() ->> 'email') = 'gbmandeep@hotmail.com');</pre>
     }
 
     function updateAddressSuggestions() {
-        const input = document.getElementById('propertyAddress').value.toLowerCase(); const list = document.getElementById('addressSuggestions'); list.innerHTML = ''; if (input.length < 2) return;
-        const matches = [...new Set(certificates.map(c => c.propertyAddress))].filter(a => a.toLowerCase().includes(input)).slice(0, 5);
-        matches.forEach(m => { const li = document.createElement('li'); li.textContent = m; li.onclick = () => { document.getElementById('propertyAddress').value = m; list.innerHTML = ''; }; list.appendChild(li); });
+        var addrInput = document.getElementById('propertyAddress');
+        var val = addrInput ? addrInput.value : '';
+        var list = document.getElementById('addressSuggestions');
+        list.innerHTML = '';
+        clearTimeout(_addrNomTimer);
+        if (val.length < 2) return;
+
+        // Existing certs — immediate
+        var lower = val.toLowerCase();
+        var certMatches = [...new Set(certificates.map(function(c){ return c.propertyAddress; }))]
+            .filter(function(a){ return a && a.toLowerCase().includes(lower); }).slice(0, 3);
+        if (certMatches.length) {
+            var hdr = document.createElement('li');
+            hdr.textContent = 'Saved Addresses';
+            hdr.style.cssText = 'font-size:0.68rem;font-weight:700;color:#94a3b8;padding:4px 12px 2px;pointer-events:none;text-transform:uppercase;letter-spacing:0.05em;';
+            list.appendChild(hdr);
+            certMatches.forEach(function(m) {
+                var li = document.createElement('li');
+                li.innerHTML = '<i class="fas fa-history" style="color:#6366f1;margin-right:6px;font-size:0.75rem;"></i>' + escapeHTML(m);
+                li.onclick = function() { addrInput.value = m; list.innerHTML = ''; updateAddressMatchPanel(); };
+                list.appendChild(li);
+            });
+        }
+
+        // Nominatim UK address search — debounced, only when looks like a street address (5+ chars, starts with digit or letter)
+        if (val.length >= 5) {
+            _addrNomTimer = setTimeout(function() { _searchNominatimAddress(val); }, 500);
+        }
+    }
+
+    async function _searchNominatimAddress(query) {
+        try {
+            var resp = await fetch(
+                'https://nominatim.openstreetmap.org/search?q=' + encodeURIComponent(query) +
+                '&countrycodes=gb&format=json&addressdetails=1&limit=7',
+                { headers: { 'Accept-Language': 'en-GB,en' } }
+            );
+            if (!resp.ok) return;
+            var results = await resp.json();
+            // Only use results with a road + postcode
+            var hits = results.filter(function(r){ return r.address && r.address.postcode && (r.address.road || r.address.pedestrian || r.address.footway); }).slice(0, 5);
+            if (!hits.length) return;
+
+            var list = document.getElementById('addressSuggestions');
+            // Remove stale Nominatim rows then re-add
+            list.querySelectorAll('.nom-row').forEach(function(n){ n.remove(); });
+
+            var hdr2 = document.createElement('li');
+            hdr2.className = 'nom-row';
+            hdr2.textContent = 'UK Addresses';
+            hdr2.style.cssText = 'font-size:0.68rem;font-weight:700;color:#94a3b8;padding:6px 12px 2px;pointer-events:none;text-transform:uppercase;letter-spacing:0.05em;border-top:1px solid #f1f5f9;margin-top:2px;';
+            list.appendChild(hdr2);
+
+            hits.forEach(function(r) {
+                var a = r.address || {};
+                var houseNum = a.house_number || '';
+                var road = titleCaseName(a.road || a.pedestrian || a.footway || a.path || '');
+                var suburb = a.suburb || a.neighbourhood || '';
+                if (/^(london borough|city of |metropolitan borough|county of )/i.test(suburb)) suburb = '';
+                var town = a.town || a.city || a.village || '';
+                if (/^(london borough|city of |metropolitan borough|county of )/i.test(town)) town = '';
+                var displayTown = titleCaseName(suburb || town);
+                var borough = '';
+                if (a.city_district) {
+                    borough = a.city_district.replace(/^(London Borough of |Metropolitan Borough of |City of |Borough of )/i, '').trim();
+                    if (/^(Greater London|England|UK|United Kingdom)/i.test(borough)) borough = '';
+                } else if (a.county && !/^(Greater London|England|UK|United Kingdom)/i.test(a.county)) {
+                    borough = titleCaseName(a.county);
+                }
+                var postcode = (a.postcode || '').toUpperCase();
+
+                // Build full formatted address for the field
+                var addrParts = [];
+                if (houseNum && road) addrParts.push(houseNum + ' ' + road);
+                else if (road) addrParts.push(road);
+                if (displayTown) addrParts.push(displayTown);
+                if (borough && borough.toLowerCase() !== displayTown.toLowerCase()) addrParts.push(titleCaseName(borough));
+                if (postcode) addrParts.push(postcode);
+                var fullAddr = addrParts.join(', ');
+                if (!fullAddr) return;
+
+                var li = document.createElement('li');
+                li.className = 'nom-row';
+                li.innerHTML =
+                    '<i class="fas fa-map-marker-alt" style="color:#ef4444;margin-right:6px;font-size:0.75rem;"></i>' +
+                    '<span>' + escapeHTML(fullAddr) + '</span>' +
+                    (postcode ? '<span style="margin-left:auto;font-size:0.7rem;color:#6366f1;font-weight:700;padding-left:8px;white-space:nowrap;">' + postcode + '</span>' : '');
+                li.style.cssText = 'display:flex;align-items:center;gap:0;';
+                li.onclick = function() {
+                    var addrEl = document.getElementById('propertyAddress');
+                    if (addrEl) addrEl.value = fullAddr;
+                    if (postcode) {
+                        var pcInput = document.getElementById('postcodeInput');
+                        if (pcInput) {
+                            pcInput.value = postcode;
+                            pcInput.dispatchEvent(new Event('input'));
+                        }
+                    }
+                    list.innerHTML = '';
+                    updateAddressMatchPanel();
+                };
+                list.appendChild(li);
+            });
+        } catch(e) {}
     }
     function updateContactSuggestions(fieldId) {
         const input = document.getElementById(fieldId).value.toLowerCase(); const list = document.getElementById('suggest-' + fieldId); list.innerHTML = ''; if(input.length < 2) return;

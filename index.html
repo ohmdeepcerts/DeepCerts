@@ -5767,25 +5767,14 @@ using ((auth.jwt() ->> 'email') = 'gbmandeep@hotmail.com');</pre>
 
     function selectRoad(road) {
         var addrEl = document.getElementById('propertyAddress');
-        if (!addrEl) return;
-        var parts = [];
-        if (road)               parts.push(road);
+        if (!addrEl || !road) return;
+        var parts = [road];
         if (_lastPostTown)      parts.push(_lastPostTown);
         if (_lastPostCounty)    parts.push(_lastPostCounty);
         if (_lastValidPostcode) parts.push(_lastValidPostcode);
         addrEl.value = parts.join(', ');
         addrEl.focus();
         addrEl.setSelectionRange(0, 0);
-        // Highlight active chip and update status hint
-        var roadSel = document.getElementById('roadSelector');
-        if (roadSel) {
-            roadSel.querySelectorAll('button').forEach(function(btn) {
-                var isSelected = btn.textContent.trim() === road;
-                btn.style.background = isSelected ? '#4338ca' : '#eef2ff';
-                btn.style.color      = isSelected ? '#fff'    : '#4338ca';
-                btn.style.borderColor = isSelected ? '#4338ca' : '#c7d2fe';
-            });
-        }
     }
 
     async function validatePostcode(pc) {
@@ -5803,19 +5792,90 @@ using ((auth.jwt() ->> 'email') = 'gbmandeep@hotmail.com');</pre>
                 if (el) { el.value = p.postcode; el.style.borderColor = '#10b981'; }
                 if (icon) { icon.innerHTML = '<i class="fas fa-check-circle" style="color:#10b981;"></i>'; icon.style.display = 'block'; }
 
-                // Derive proper postal town and county from postcodes.io
-                // post_town is the Royal Mail postal town (e.g. ILFORD, not the ward "Clementswood")
-                var postTown   = p.post_town   ? titleCaseName(p.post_town)   : '';
-                // admin_county is set for most of England (e.g. Essex, Kent); empty for London boroughs
+                // ── Town: postcodes.io post_town is Royal Mail postal town (e.g. "ILFORD").
+                // It can be null on some records, so fall back in order:
+                // post_town → admin_district (borough) — Nominatim suburb added below after search.
+                var postTown   = p.post_town    ? titleCaseName(p.post_town)    :
+                                 p.admin_district ? titleCaseName(p.admin_district) : '';
+                // ── County: admin_county covers England outside London (e.g. "Essex", "Kent").
+                // London boroughs have no admin_county so we leave county blank for them.
                 var postCounty = p.admin_county ? titleCaseName(p.admin_county) : '';
-                // For non-London regions without admin_county use region (e.g. Yorkshire, East Midlands)
                 if (!postCounty && p.region && p.region !== 'London' && p.region !== 'England') {
                     postCounty = titleCaseName(p.region);
                 }
 
-                // Fill Town/County helper fields from postcodes.io (better than Zippopotam ward data)
-                // Cancel Zippopotam debounce so it doesn't overwrite with inferior ward names
                 clearTimeout(_zippoDebounceTimer);
+                var current = addrEl ? addrEl.value.trim() : '';
+                var isEmpty  = !current || current.toUpperCase() === p.postcode;
+
+                if (status) status.innerHTML =
+                    '<i class="fas fa-spinner fa-spin" style="color:#6366f1;"></i> Looking up road names...';
+
+                // ── Nominatim SEARCH using postalcode parameter (more accurate than free-text q=)
+                // Extracts ALL road names covered by the postcode + suburb name for town fallback.
+                var roads = [];
+                var nomSuburb = '';
+                try {
+                    var nomResp = await fetch(
+                        'https://nominatim.openstreetmap.org/search' +
+                        '?postalcode=' + encodeURIComponent(p.postcode.replace(/\s/g,'')) +
+                        '&countrycodes=gb&format=json&addressdetails=1&limit=50',
+                        { headers: { 'Accept-Language': 'en-GB,en' } }
+                    );
+                    if (nomResp.ok) {
+                        var nomResults = await nomResp.json();
+                        var roadSet  = new Set();
+                        var suburbCounts = {};
+                        nomResults.forEach(function(r) {
+                            var a = r.address || {};
+                            // Road-type fields Nominatim uses — in priority order
+                            var road = a.road || a.pedestrian || a.footway || a.path ||
+                                       a.residential || a.service || a.unclassified || '';
+                            if (road) roadSet.add(titleCaseName(road));
+                            // Suburb/neighbourhood as town fallback
+                            var sub = a.suburb || a.city_district || a.quarter || a.neighbourhood ||
+                                      a.town || a.village || '';
+                            if (sub) suburbCounts[sub] = (suburbCounts[sub] || 0) + 1;
+                        });
+                        roads = Array.from(roadSet).sort();
+                        // Pick the most-mentioned suburb as town (e.g. "Ilford" appears in most results)
+                        var topSub = Object.keys(suburbCounts).sort(function(a,b){ return suburbCounts[b]-suburbCounts[a]; })[0];
+                        if (topSub) nomSuburb = titleCaseName(topSub);
+                    }
+                } catch(e) {}
+
+                // ── If search found no roads, reverse geocode the lat/lng centroid.
+                // zoom=18 (address level) gives more precise results than zoom=17.
+                if (roads.length === 0 && p.latitude && p.longitude) {
+                    try {
+                        var revResp = await fetch(
+                            'https://nominatim.openstreetmap.org/reverse?format=json' +
+                            '&lat=' + p.latitude + '&lon=' + p.longitude +
+                            '&zoom=18&addressdetails=1',
+                            { headers: { 'Accept-Language': 'en-GB,en' } }
+                        );
+                        if (revResp.ok) {
+                            var revData  = await revResp.json();
+                            var ra = revData.address || {};
+                            var road = ra.road || ra.pedestrian || ra.footway || ra.path ||
+                                       ra.residential || ra.service || ra.unclassified || '';
+                            if (road) roads = [titleCaseName(road)];
+                            if (!nomSuburb) {
+                                nomSuburb = titleCaseName(
+                                    ra.suburb || ra.city_district || ra.quarter || ra.town || ra.village || ''
+                                );
+                            }
+                        }
+                    } catch(e) {}
+                }
+
+                // ── Use Nominatim suburb as town if postcodes.io gave us nothing better
+                if (!postTown && nomSuburb) postTown = nomSuburb;
+
+                // Cache for selectRoad()
+                _lastPostTown = postTown; _lastPostCounty = postCounty; _lastValidPostcode = p.postcode;
+
+                // Fill the Town / County helper fields
                 var townEl   = document.getElementById('zippoTown');
                 var countyEl = document.getElementById('zippoCounty');
                 var zippoDiv = document.getElementById('zippoFields');
@@ -5823,67 +5883,25 @@ using ((auth.jwt() ->> 'email') = 'gbmandeep@hotmail.com');</pre>
                 if (countyEl) { countyEl.value = postCounty; countyEl.classList.add('filled-auto'); }
                 if (zippoDiv) zippoDiv.style.display = 'grid';
 
-                // Cache town/county/postcode for selectRoad() to read
-                _lastPostTown = postTown; _lastPostCounty = postCounty; _lastValidPostcode = p.postcode;
-
-                var current = addrEl ? addrEl.value.trim() : '';
-                var isEmpty = !current || current.toUpperCase() === p.postcode;
-
-                if (status) status.innerHTML =
-                    '<i class="fas fa-spinner fa-spin" style="color:#6366f1;"></i> Looking up road names...';
-
-                // Step 1: Nominatim SEARCH — returns all OSM objects matching this postcode,
-                // letting us extract every unique road name covered by it.
-                var roads = [];
-                try {
-                    var nomResp = await fetch(
-                        'https://nominatim.openstreetmap.org/search?q=' + encodeURIComponent(p.postcode) +
-                        '&countrycodes=gb&format=json&addressdetails=1&limit=50',
-                        { headers: { 'Accept-Language': 'en-GB,en' } }
-                    );
-                    if (nomResp.ok) {
-                        var nomResults = await nomResp.json();
-                        var roadSet = new Set();
-                        nomResults.forEach(function(r) {
-                            if (r.address && r.address.road) roadSet.add(titleCaseName(r.address.road));
-                        });
-                        roads = Array.from(roadSet).sort();
-                    }
-                } catch(e) {}
-
-                // Step 2: Fallback — reverse geocode the centroid if search found no roads
-                if (roads.length === 0 && p.latitude && p.longitude) {
-                    try {
-                        var revResp = await fetch(
-                            'https://nominatim.openstreetmap.org/reverse?format=json&lat=' +
-                            p.latitude + '&lon=' + p.longitude + '&zoom=17&addressdetails=1',
-                            { headers: { 'Accept-Language': 'en-GB,en' } }
-                        );
-                        if (revResp.ok) {
-                            var revData = await revResp.json();
-                            if (revData.address && revData.address.road)
-                                roads = [titleCaseName(revData.address.road)];
-                        }
-                    } catch(e) {}
-                }
-
-                // Build and show the road selector chips (hidden if only one road)
+                // ── Road dropdown — shown only when multiple roads found
                 var roadSel = document.getElementById('roadSelector');
                 if (roadSel) { roadSel.style.display = 'none'; roadSel.innerHTML = ''; }
 
                 if (roads.length > 1 && roadSel) {
                     roadSel.style.display = 'flex';
                     roadSel.innerHTML =
-                        '<span style="font-size:0.72rem;color:#6b7280;font-weight:700;white-space:nowrap;padding:2px 0;">' +
-                        '<i class="fas fa-road" style="margin-right:4px;"></i>Select road:</span>' +
+                        '<label style="font-size:0.72rem;color:#6b7280;font-weight:700;white-space:nowrap;margin:0;">' +
+                        '<i class="fas fa-road" style="margin-right:4px;"></i>Road name:</label>' +
+                        '<select onchange="selectRoad(this.value)" ' +
+                        'style="flex:1;padding:5px 10px;border-radius:8px;border:1px solid #c7d2fe;background:#eef2ff;' +
+                        'color:#4338ca;font-size:0.8rem;font-weight:600;cursor:pointer;">' +
+                        '<option value="">— Select road —</option>' +
                         roads.map(function(r) {
-                            return '<button type="button" onclick="selectRoad(' + JSON.stringify(r) + ')" ' +
-                                'style="padding:4px 11px;border-radius:20px;border:1px solid #c7d2fe;background:#eef2ff;' +
-                                'color:#4338ca;font-size:0.75rem;font-weight:700;cursor:pointer;white-space:nowrap;' +
-                                'transition:all 0.15s;" onmouseover="this.style.background=\'#4338ca\';this.style.color=\'#fff\'" ' +
-                                'onmouseout="this.style.background=\'#eef2ff\';this.style.color=\'#4338ca\'">' +
-                                escapeHTML(r) + '</button>';
-                        }).join('');
+                            return '<option value="' + escapeHTML(r) + '">' + escapeHTML(r) + '</option>';
+                        }).join('') +
+                        '</select>';
+                    // Auto-select the first road so address is pre-filled
+                    roadSel.querySelector('select').value = roads[0];
                 }
 
                 // Auto-fill the address field with the first road (or just town/postcode if no roads)
@@ -5899,7 +5917,7 @@ using ((auth.jwt() ->> 'email') = 'gbmandeep@hotmail.com');</pre>
                 }
 
                 var hintText = roads.length > 1
-                    ? '<i class="fas fa-hand-pointer"></i> ' + roads.length + ' roads found — select above, then type the house number at the start'
+                    ? '<i class="fas fa-list-ul"></i> ' + roads.length + ' roads found — pick from dropdown above, then type house number at the start'
                     : roads.length === 1
                         ? '<i class="fas fa-pencil-alt"></i> Type the house/flat number at the very start'
                         : '<i class="fas fa-pencil-alt"></i> Road not found — type the full street address at the start';

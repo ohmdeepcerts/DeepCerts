@@ -7892,7 +7892,7 @@ using ((auth.jwt() ->> 'email') = 'gbmandeep@hotmail.com');</pre>
             _appSettingsTableExists = true;
             if (!data) return;
             data.forEach(function(row) {
-                if (row.key === 'gemini_api_key' && row.value) {
+                if (row.key === 'gemini_key' && row.value) {
                     _geminiApiKey = row.value;
                     localStorage.setItem('deepcerts_gemini_key', row.value);
                 }
@@ -7938,16 +7938,24 @@ using ((auth.jwt() ->> 'email') = 'gbmandeep@hotmail.com');</pre>
         var badge = document.getElementById('geminiStatusBadge');
         if (clear) {
             _geminiApiKey = '';
-            await saveAppSetting('gemini_api_key', '');
+            localStorage.removeItem('deepcerts_gemini_key');
+            await saveAppSetting('gemini_key', '');
             if (input) input.value = '';
             if (badge) { badge.innerText = 'Not configured'; badge.style.color = '#94a3b8'; badge.style.background = '#f1f5f9'; }
             showToast('Gemini key cleared.', 'info');
             return;
         }
-        var rawKey = (input ? input.value.trim() : '').replace(/●/g, '');
-        if (!rawKey) { saveGeminiKey(true); return; }
+        var inputVal = input ? input.value.trim() : '';
+        var isStillMasked = /^●+$/.test(inputVal);
+        if (isStillMasked && _geminiApiKey) {
+            showToast('Key already saved.', 'info');
+            return;
+        }
+        var rawKey = inputVal.replace(/●/g, '');
+        if (!rawKey) { showToast('Enter a key first.', 'error'); return; }
         _geminiApiKey = rawKey;
-        await saveAppSetting('gemini_api_key', rawKey);
+        localStorage.setItem('deepcerts_gemini_key', rawKey);
+        await saveAppSetting('gemini_key', rawKey);
         if (badge) { badge.innerText = '✓ Saved to cloud'; badge.style.color = '#16a34a'; badge.style.background = '#f0fdf4'; }
         if (input) input.value = '●'.repeat(20);
         showToast('Gemini API key saved to cloud ☁️', 'success');

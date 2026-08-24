@@ -7933,7 +7933,7 @@ using ((auth.jwt() ->> 'email') = 'gbmandeep@hotmail.com');</pre>
             badge.innerText = 'Not configured'; badge.style.color = '#94a3b8'; badge.style.background = '#f1f5f9';
         }
     }
-    function saveGeminiKey(clear) {
+    async function saveGeminiKey(clear) {
         var input = document.getElementById('geminiApiKeyInput');
         var badge = document.getElementById('geminiStatusBadge');
         if (clear) {

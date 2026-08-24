@@ -6589,7 +6589,7 @@ using ((auth.jwt() ->> 'email') = 'gbmandeep@hotmail.com');</pre>
 
             var resp = await fetch(
                 'https://photon.komoot.io/api/?q=' + encodeURIComponent(query) +
-                '&countrycodes=gb&limit=8&lang=en',
+                '&countrycode=gb&limit=8&lang=en',
                 { headers: { 'Accept-Language': 'en-GB,en' } }
             );
             if (!resp.ok) return;

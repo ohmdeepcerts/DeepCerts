@@ -5796,28 +5796,54 @@ using ((auth.jwt() ->> 'email') = 'gbmandeep@hotmail.com');</pre>
                 if (zippoDiv) zippoDiv.style.display = 'grid';
 
                 // Auto-fill address field only if it's empty or still just a postcode
-                if (addrEl) {
-                    var current = addrEl.value.trim();
-                    var isEmpty = !current || current.toUpperCase() === p.postcode;
-                    if (isEmpty) {
-                        // Use postal town (not admin ward) so address reads naturally
-                        var parts = [];
-                        if (postTown) parts.push(postTown);
-                        if (postCounty) parts.push(postCounty);
-                        parts.push(p.postcode);
-                        addrEl.value = parts.join(', ');
-                        // Cursor to position 0 so user types street number at the front
-                        addrEl.focus();
-                        addrEl.setSelectionRange(0, 0);
-                    }
+                var current = addrEl ? addrEl.value.trim() : '';
+                var isEmpty = !current || current.toUpperCase() === p.postcode;
+
+                // Show interim status while we look up the road name
+                if (status) status.innerHTML =
+                    '<i class="fas fa-spinner fa-spin" style="color:#6366f1;"></i> ' +
+                    'Looking up road name...';
+
+                // Nominatim reverse geocode — uses postcodes.io lat/lng to find the road name
+                // Free, no API key needed. Rate limit: 1 req/sec (fine for single lookups)
+                var roadName = '';
+                if (p.latitude && p.longitude) {
+                    try {
+                        var nomResp = await fetch(
+                            'https://nominatim.openstreetmap.org/reverse?format=json&lat=' +
+                            p.latitude + '&lon=' + p.longitude + '&zoom=17&addressdetails=1',
+                            { headers: { 'Accept-Language': 'en-GB,en' } }
+                        );
+                        if (nomResp.ok) {
+                            var nomData = await nomResp.json();
+                            roadName = nomData.address && nomData.address.road ? titleCaseName(nomData.address.road) : '';
+                        }
+                    } catch(e) { /* Nominatim unavailable — carry on without road name */ }
                 }
+
+                if (addrEl && isEmpty) {
+                    var parts = [];
+                    if (roadName) parts.push(roadName);
+                    if (postTown) parts.push(postTown);
+                    if (postCounty) parts.push(postCounty);
+                    parts.push(p.postcode);
+                    addrEl.value = parts.join(', ');
+                    // Position cursor at start so user types house/flat number in front
+                    addrEl.focus();
+                    addrEl.setSelectionRange(0, 0);
+                }
+
+                var hintText = roadName
+                    ? '<i class="fas fa-pencil-alt"></i> Type the house/flat number at the start'
+                    : '<i class="fas fa-pencil-alt"></i> Type the full street address at the start';
 
                 if (status) status.innerHTML =
                     '<i class="fas fa-check-circle" style="color:#10b981;"></i> ' +
                     '<strong style="color:#10b981;">' + p.postcode + '</strong>' +
-                    (postTown   ? ' — ' + escapeHTML(postTown)               : '') +
+                    (roadName   ? ' — ' + escapeHTML(roadName)               : '') +
+                    (postTown   ? ', '  + escapeHTML(postTown)               : '') +
                     (postCounty ? ', '  + escapeHTML(postCounty)             : '') +
-                    ' &nbsp;·&nbsp; <span style="color:#6366f1; font-weight:600;"><i class="fas fa-pencil-alt"></i> Type the door/flat number at the start of the address field</span>';
+                    ' &nbsp;·&nbsp; <span style="color:#6366f1; font-weight:600;">' + hintText + '</span>';
             } else {
                 _pcValid = false;
                 if (el) el.style.borderColor = '#ef4444';

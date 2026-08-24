@@ -5775,18 +5775,38 @@ using ((auth.jwt() ->> 'email') = 'gbmandeep@hotmail.com');</pre>
                 if (el) { el.value = p.postcode; el.style.borderColor = '#10b981'; }
                 if (icon) { icon.innerHTML = '<i class="fas fa-check-circle" style="color:#10b981;"></i>'; icon.style.display = 'block'; }
 
+                // Derive proper postal town and county from postcodes.io
+                // post_town is the Royal Mail postal town (e.g. ILFORD, not the ward "Clementswood")
+                var postTown   = p.post_town   ? titleCaseName(p.post_town)   : '';
+                // admin_county is set for most of England (e.g. Essex, Kent); empty for London boroughs
+                var postCounty = p.admin_county ? titleCaseName(p.admin_county) : '';
+                // For non-London regions without admin_county use region (e.g. Yorkshire, East Midlands)
+                if (!postCounty && p.region && p.region !== 'London' && p.region !== 'England') {
+                    postCounty = titleCaseName(p.region);
+                }
+
+                // Fill Town/County helper fields from postcodes.io (better than Zippopotam ward data)
+                // Cancel Zippopotam debounce so it doesn't overwrite with inferior ward names
+                clearTimeout(_zippoDebounceTimer);
+                var townEl   = document.getElementById('zippoTown');
+                var countyEl = document.getElementById('zippoCounty');
+                var zippoDiv = document.getElementById('zippoFields');
+                if (townEl)   { townEl.value   = postTown;   townEl.classList.add('filled-auto');   }
+                if (countyEl) { countyEl.value = postCounty; countyEl.classList.add('filled-auto'); }
+                if (zippoDiv) zippoDiv.style.display = 'grid';
+
                 // Auto-fill address field only if it's empty or still just a postcode
                 if (addrEl) {
                     var current = addrEl.value.trim();
                     var isEmpty = !current || current.toUpperCase() === p.postcode;
                     if (isEmpty) {
-                        // Build: ward, district, postcode — user types door number at the front
+                        // Use postal town (not admin ward) so address reads naturally
                         var parts = [];
-                        if (p.admin_ward) parts.push(titleCaseAddress(p.admin_ward));
-                        if (p.admin_district && p.admin_district !== p.admin_ward) parts.push(titleCaseAddress(p.admin_district));
+                        if (postTown) parts.push(postTown);
+                        if (postCounty) parts.push(postCounty);
                         parts.push(p.postcode);
                         addrEl.value = parts.join(', ');
-                        // Select all so user can immediately type or just add house number at start
+                        // Cursor to position 0 so user types street number at the front
                         addrEl.focus();
                         addrEl.setSelectionRange(0, 0);
                     }
@@ -5794,9 +5814,9 @@ using ((auth.jwt() ->> 'email') = 'gbmandeep@hotmail.com');</pre>
 
                 if (status) status.innerHTML =
                     '<i class="fas fa-check-circle" style="color:#10b981;"></i> ' +
-                    '<strong style="color:#10b981;">' + p.postcode + '</strong> — ' +
-                    escapeHTML(p.admin_ward || '') + ', ' + escapeHTML(p.admin_district || '') +
-                    (p.region ? ', ' + escapeHTML(p.region) : '') +
+                    '<strong style="color:#10b981;">' + p.postcode + '</strong>' +
+                    (postTown   ? ' — ' + escapeHTML(postTown)               : '') +
+                    (postCounty ? ', '  + escapeHTML(postCounty)             : '') +
                     ' &nbsp;·&nbsp; <span style="color:#6366f1; font-weight:600;"><i class="fas fa-pencil-alt"></i> Type the door/flat number at the start of the address field</span>';
             } else {
                 _pcValid = false;

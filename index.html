@@ -5792,11 +5792,11 @@ using ((auth.jwt() ->> 'email') = 'gbmandeep@hotmail.com');</pre>
                 if (el) { el.value = p.postcode; el.style.borderColor = '#10b981'; }
                 if (icon) { icon.innerHTML = '<i class="fas fa-check-circle" style="color:#10b981;"></i>'; icon.style.display = 'block'; }
 
-                // ── Town: postcodes.io post_town is Royal Mail postal town (e.g. "ILFORD").
-                // It can be null on some records, so fall back in order:
-                // post_town → admin_district (borough) — Nominatim suburb added below after search.
-                var postTown   = p.post_town    ? titleCaseName(p.post_town)    :
-                                 p.admin_district ? titleCaseName(p.admin_district) : '';
+                // ── Town: use post_town (Royal Mail postal town) if available.
+                // Do NOT fall back to admin_district here — that gives borough names like
+                // "Redbridge" / "Barking and Dagenham" which are wrong in a postal address.
+                // We'll use the Nominatim suburb (e.g. "Ilford", "Dagenham") after the search.
+                var postTown = p.post_town ? titleCaseName(p.post_town) : '';
                 // ── County: admin_county covers England outside London (e.g. "Essex", "Kent").
                 // London boroughs have no admin_county so we leave county blank for them.
                 var postCounty = p.admin_county ? titleCaseName(p.admin_county) : '';
@@ -5818,7 +5818,7 @@ using ((auth.jwt() ->> 'email') = 'gbmandeep@hotmail.com');</pre>
                 try {
                     var nomResp = await fetch(
                         'https://nominatim.openstreetmap.org/search' +
-                        '?postalcode=' + encodeURIComponent(p.postcode.replace(/\s/g,'')) +
+                        '?postalcode=' + encodeURIComponent(p.postcode) +
                         '&countrycodes=gb&format=json&addressdetails=1&limit=50',
                         { headers: { 'Accept-Language': 'en-GB,en' } }
                     );
@@ -5869,8 +5869,9 @@ using ((auth.jwt() ->> 'email') = 'gbmandeep@hotmail.com');</pre>
                     } catch(e) {}
                 }
 
-                // ── Use Nominatim suburb as town if postcodes.io gave us nothing better
-                if (!postTown && nomSuburb) postTown = nomSuburb;
+                // ── Resolve final town: suburb > admin_district (borough is last resort only)
+                if (!postTown && nomSuburb)        postTown = nomSuburb;
+                if (!postTown && p.admin_district) postTown = titleCaseName(p.admin_district);
 
                 // Cache for selectRoad()
                 _lastPostTown = postTown; _lastPostCounty = postCounty; _lastValidPostcode = p.postcode;

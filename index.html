@@ -8446,7 +8446,7 @@ using ((auth.jwt() ->> 'email') = 'gbmandeep@hotmail.com');</pre>
         if (addrEl && combined) addrEl.value = titleCaseAddress(combined);
         const addr = document.getElementById('propertyAddress').value; 
         const exp = document.getElementById('expiryDate').value;
-        if(!addr || !exp) return showToast("Address and Expiry Date are required", "error");
+        if(!addr) return showToast("Address is required", "error");
         if (selectedCertTypes.size === 0) return showToast("Please select at least one certificate type", "error");
 
         const saveBtn = document.getElementById('saveCertBtn');

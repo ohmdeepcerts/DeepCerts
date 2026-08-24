@@ -1582,6 +1582,18 @@
         <h3 style="margin-top:0px; margin-bottom:20px;">Certificate Type Compliance</h3>
         <div id="typeCards" class="type-cards-grid"></div>
 
+        <!-- ══ RECENT ENTRIES ══ -->
+        <div id="recentEntriesPanel" style="background:white; border-radius:16px; border:1px solid #e2e8f0; padding:24px; margin-top:8px; margin-bottom:8px; box-shadow:0 2px 4px rgba(0,0,0,0.02);">
+            <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:16px;">
+                <div>
+                    <h4 style="margin:0; font-size:1rem; font-weight:800; color:#0f172a;"><i class="fas fa-clock" style="color:#6366f1; margin-right:8px;"></i>Recent Entries</h4>
+                    <p style="margin:4px 0 0; color:#94a3b8; font-size:0.78rem;">Last certificates added — pick up where you left off.</p>
+                </div>
+                <button onclick="document.getElementById('sortOrder').value='added-newest'; showSection('manage');" style="padding:6px 14px; background:#f1f5f9; color:#334155; border:none; border-radius:8px; font-size:0.78rem; font-weight:700; cursor:pointer;">View All →</button>
+            </div>
+            <div id="recentEntriesList"></div>
+        </div>
+
         <!-- ══ EXPIRY CALENDAR HEATMAP ══ -->
         <div style="background:white; border-radius:16px; border:1px solid #e2e8f0; padding:24px; margin-top:8px; box-shadow:0 2px 4px rgba(0,0,0,0.02);">
             <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:18px; flex-wrap:wrap; gap:10px;">
@@ -1618,7 +1630,7 @@
             <div class="filter-group"><label>Landlord</label><input type="text" list="landlordList" id="filterLandlord" placeholder="Type to search..." onchange="resetPageAndDisplay()" style="min-width: 150px;"><datalist id="landlordList"></datalist></div>
             <div class="filter-group"><label>Agent</label><input type="text" list="agentList" id="filterAgent" placeholder="Type to search..." onchange="resetPageAndDisplay()" style="min-width: 150px;"><datalist id="agentList"></datalist></div>
 
-            <div class="filter-group"><label>Sort By</label><select id="sortOrder" onchange="resetPageAndDisplay()"><option value="expiry-asc">Expiry (Soonest)</option><option value="expiry-desc">Expiry (Latest)</option><option value="address-az">Address (A-Z)</option></select></div>
+            <div class="filter-group"><label>Sort By</label><select id="sortOrder" onchange="resetPageAndDisplay()"><option value="expiry-asc">Expiry (Soonest)</option><option value="expiry-desc">Expiry (Latest)</option><option value="address-az">Address (A-Z)</option><option value="added-newest">Added (Newest)</option><option value="added-oldest">Added (Oldest)</option></select></div>
             <div class="filter-group"><label>Show</label><select id="pageSize" onchange="resetPageAndDisplay()"><option value="15" selected>15 entries</option><option value="50">50 entries</option><option value="100">100 entries</option><option value="500">500 entries</option></select></div>
             
             <div style="flex-grow:1; display:flex; justify-content:flex-end; gap:10px;">
@@ -1712,7 +1724,7 @@
                                 <input type="text" id="propertyAddress" onpaste="setTimeout(()=>parseAndFillAddress(this.value),10)" class="input-with-icon"
                                     style="width:100%; padding:12px;"
                                     placeholder="Road, Town, County auto-fills — then type door/flat no. at the start..."
-                                    oninput="updateAddressSuggestions()"
+                                    oninput="updateAddressSuggestions(); updateAddressMatchPanel();"
                                     onblur="autoCorrectAddress()"
                                     autocomplete="off">
                                 <ul id="addressSuggestions" class="suggestions-dropdown"></ul>
@@ -1766,7 +1778,11 @@
             <div style="display:flex; flex-direction:column; gap:20px;">
                 <div class="form-card" style="background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); color:white;">
                     <h4 style="margin-top:0;"><i class="fas fa-lightbulb" style="color:var(--warning); margin-right:10px;"></i> Pro Tip</h4>
-                    <p style="font-size:0.85rem; line-height:1.6; opacity:0.9;">Type a name to auto-fill details.<br>Click multiple certificate types to save them all at once!</p>
+                    <p style="font-size:0.85rem; line-height:1.6; opacity:0.9;">Enter a postcode to auto-fill the address. Select one cert type per save — FIRE &amp; EMERG can be selected together.</p>
+                </div>
+                <div id="addressMatchPanel" class="form-card" style="display:none;">
+                    <h4 style="margin-top:0; font-size:0.9rem; color:#0f172a; display:flex; align-items:center; gap:8px;"><i class="fas fa-copy" style="color:#ef4444;"></i> Existing Certs at This Address</h4>
+                    <div id="addressMatchList"></div>
                 </div>
                 <div class="form-card"><h4 style="margin-top:0; font-size:0.9rem;">Recent Activity</h4><div id="miniRecentList" style="font-size:0.8rem; color:#64748b;"></div></div>
             </div>
@@ -2091,6 +2107,31 @@
                 </div>
             </div>
 
+            <!-- ═══ GEMINI AI BACKUP GEOCODER ═══ -->
+            <div style="background:white;border-radius:16px;border:1px solid #e2e8f0;padding:24px 28px;margin-bottom:20px;box-shadow:0 2px 8px rgba(0,0,0,0.03);">
+                <div style="display:flex;align-items:center;gap:12px;margin-bottom:18px;padding-bottom:14px;border-bottom:1px solid #f1f5f9;">
+                    <div style="width:40px;height:40px;background:#faf5ff;border-radius:10px;display:flex;align-items:center;justify-content:center;">
+                        <i class="fas fa-robot" style="color:#7c3aed;font-size:1rem;"></i>
+                    </div>
+                    <div>
+                        <div style="font-weight:800;color:#0f172a;font-size:1rem;">Gemini AI — Address Backup</div>
+                        <div style="font-size:0.8rem;color:#94a3b8;margin-top:2px;">Used only when postcodes.io + Nominatim can't find the road name. Free: 1,500 lookups/day.</div>
+                    </div>
+                    <div id="geminiStatusBadge" style="margin-left:auto;padding:4px 12px;border-radius:20px;font-size:0.72rem;font-weight:700;background:#f1f5f9;color:#94a3b8;">Not configured</div>
+                </div>
+                <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+                    <input type="password" id="geminiApiKeyInput" placeholder="Paste your Gemini API key (AIza...)"
+                        style="flex:1;min-width:220px;padding:10px 14px;border-radius:10px;border:1px solid #e2e8f0;font-size:0.85rem;font-family:monospace;"
+                        oninput="document.getElementById('geminiStatusBadge').innerText='Unsaved'; document.getElementById('geminiStatusBadge').style.color='#d97706';">
+                    <button onclick="saveGeminiKey()" style="padding:10px 18px;background:#7c3aed;color:white;border:none;border-radius:10px;font-weight:700;font-size:0.82rem;cursor:pointer;white-space:nowrap;"><i class="fas fa-save" style="margin-right:6px;"></i>Save Key</button>
+                    <button onclick="testGeminiKey()" style="padding:10px 16px;background:#f1f5f9;color:#334155;border:none;border-radius:10px;font-weight:700;font-size:0.82rem;cursor:pointer;white-space:nowrap;"><i class="fas fa-vial" style="margin-right:6px;"></i>Test</button>
+                    <button onclick="saveGeminiKey(true)" style="padding:10px 14px;background:white;color:#ef4444;border:1px solid #fecaca;border-radius:10px;font-weight:700;font-size:0.82rem;cursor:pointer;" title="Clear key"><i class="fas fa-trash"></i></button>
+                </div>
+                <div style="margin-top:12px;padding:10px 14px;background:#faf5ff;border-radius:8px;border:1px solid #e9d5ff;font-size:0.78rem;color:#6b21a8;line-height:1.6;">
+                    <strong>How to get a free key:</strong> Go to <strong>aistudio.google.com</strong> → Get API key → Create API key. The Gemini 2.0 Flash model is used — it's instant and free. The key is stored only in your browser's local storage, never sent anywhere except Google's API.
+                </div>
+            </div>
+
             <!-- ═══ THEME SETTINGS ═══ -->
             <div id="themeSettingsPanel"></div>
 
@@ -2107,6 +2148,15 @@
                 </div>
                 <pre style="background:#0f172a;color:#e2e8f0;padding:14px 18px;border-radius:10px;font-size:0.82rem;overflow-x:auto;margin:0;">ALTER TABLE certificates ADD COLUMN IF NOT EXISTS reminder_sent_at timestamptz;</pre>
                 <div style="font-size:0.75rem;color:#94a3b8;margin-top:10px;"><i class="fas fa-info-circle" style="margin-right:4px;"></i>Without this, reminders are tracked in memory only (resets on page refresh). Cert saves work fine without it.</div>
+                <div style="margin-top:18px;padding-top:16px;border-top:1px solid #f1f5f9;">
+                    <div style="font-weight:700;color:#0f172a;font-size:0.9rem;margin-bottom:8px;"><i class="fas fa-cloud" style="color:#7c3aed;margin-right:6px;"></i>App Settings Table (for cross-device key sync)</div>
+                    <pre style="background:#0f172a;color:#e2e8f0;padding:14px 18px;border-radius:10px;font-size:0.82rem;overflow-x:auto;margin:0;">CREATE TABLE IF NOT EXISTS app_settings (
+  key text PRIMARY KEY,
+  value text,
+  updated_at timestamptz DEFAULT now()
+);</pre>
+                    <div style="font-size:0.75rem;color:#94a3b8;margin-top:10px;"><i class="fas fa-info-circle" style="margin-right:4px;"></i>Run this once so your Gemini API key (and future app settings) sync across all devices via Supabase.</div>
+                </div>
             </div>
 
             <!-- ═══ ADMIN ACCESS MANAGEMENT ═══ -->
@@ -2811,6 +2861,7 @@ using ((auth.jwt() ->> 'email') = 'gbmandeep@hotmail.com');</pre>
 
             setConnectionStatus('online');
             await loadCertificatesFromCloud();
+            await loadAppSettings();
             renderCertTypeGrid();
             const last = localStorage.getItem('lastView') || 'dashboard';
             showSection(last);
@@ -3487,6 +3538,7 @@ using ((auth.jwt() ->> 'email') = 'gbmandeep@hotmail.com');</pre>
             if (isCloud) setTimeout(loadSupabaseStats, 300);
             renderThemeSettings();
             renderThresholdRows();
+            initGeminiSettingsUI();
             renderCertTypeLabelGrid();
             renderMsgTemplateFields();
         }
@@ -5727,15 +5779,24 @@ using ((auth.jwt() ->> 'email') = 'gbmandeep@hotmail.com');</pre>
     }
     
     function toggleCertType(typeId) {
-        if (editIndex !== -1) { 
-            selectedCertTypes.clear(); 
-            selectedCertTypes.add(typeId); 
-        } else { 
-            if (selectedCertTypes.has(typeId)) { 
-                selectedCertTypes.delete(typeId); 
-            } else { 
-                selectedCertTypes.add(typeId); 
-            } 
+        var fireEmerg = new Set(['FIRE', 'EMERG']);
+        if (editIndex !== -1) {
+            // Edit mode: always single-select
+            selectedCertTypes.clear();
+            selectedCertTypes.add(typeId);
+        } else if (fireEmerg.has(typeId)) {
+            // FIRE/EMERG may pair together; evict any other types first
+            var hasOther = Array.from(selectedCertTypes).some(function(t){ return !fireEmerg.has(t); });
+            if (hasOther) selectedCertTypes.clear();
+            if (selectedCertTypes.has(typeId) && selectedCertTypes.size > 1) {
+                selectedCertTypes.delete(typeId);
+            } else {
+                selectedCertTypes.add(typeId);
+            }
+        } else {
+            // All other types: single-select only
+            selectedCertTypes.clear();
+            selectedCertTypes.add(typeId);
         }
         renderCertTypeGrid();
     }
@@ -5747,12 +5808,48 @@ using ((auth.jwt() ->> 'email') = 'gbmandeep@hotmail.com');</pre>
         var pcIcon = document.getElementById('pcValidIcon'); if (pcIcon) pcIcon.style.display = 'none';
         var pcStatus = document.getElementById('postcodeStatus'); if (pcStatus) pcStatus.innerHTML = '<i class="fas fa-info-circle"></i> Enter postcode first, then type the street address. Both will be combined on save.';
         _pcValid = false;
+        var amp = document.getElementById('addressMatchPanel'); if (amp) amp.style.display = 'none';
         selectedCertTypes.clear(); selectedCertTypes.add('EICR'); renderCertTypeGrid(); editIndex = -1; updateRecentActivityMini();
     }
     function updateRecentActivityMini() {
         const list = document.getElementById('miniRecentList'); const recent = certificates.slice(-5).reverse();
         if(recent.length === 0) { list.innerHTML = "No recent adds."; return; }
         let html = ''; recent.forEach(c => { html += `<div style="padding:10px 0; border-bottom:1px solid #f1f5f9; display:flex; justify-content:space-between; align-items:center;"><span style="font-size:0.8rem; color:#334155;">${escapeHTML(c.propertyAddress.substring(0, 18))}</span><span style="font-weight:700; font-size:0.75rem; background:#f1f5f9; padding:2px 6px; border-radius:4px; color:#64748b;">${escapeHTML(c.certificateType)}</span></div>`; });
+        list.innerHTML = html;
+    }
+    function updateAddressMatchPanel() {
+        var panel = document.getElementById('addressMatchPanel');
+        var list  = document.getElementById('addressMatchList');
+        if (!panel || !list) return;
+        var addr = ((document.getElementById('propertyAddress') || {}).value || '').trim().toLowerCase();
+        var pc   = ((document.getElementById('postcodeInput')  || {}).value || '').trim().toUpperCase().replace(/\s+/g,' ');
+        if (addr.length < 4 && !pc) { panel.style.display = 'none'; return; }
+        var matches = certificates.filter(function(c, i) {
+            if (editIndex !== -1 && i === editIndex) return false;
+            var ca = (c.propertyAddress || '').toLowerCase();
+            if (pc && ca.indexOf(pc.toLowerCase()) !== -1) return true;
+            if (addr.length >= 4 && ca.indexOf(addr) !== -1) return true;
+            return false;
+        });
+        if (matches.length === 0) { panel.style.display = 'none'; return; }
+        panel.style.display = 'block';
+        var html = '';
+        matches.forEach(function(c) {
+            var idx = certificates.indexOf(c);
+            var diffDays = c.expiryDate ? Math.ceil((new Date(c.expiryDate) - new Date()) / 86400000) : null;
+            var statusColor = (diffDays === null) ? '#94a3b8' : (diffDays < 0 ? '#dc2626' : (diffDays <= 30 ? '#d97706' : '#059669'));
+            var daysLabel  = (diffDays === null) ? '' : (diffDays < 0 ? Math.abs(diffDays) + 'd overdue' : diffDays + 'd left');
+            html += '<div style="padding:8px 0; border-bottom:1px solid #f1f5f9; display:flex; align-items:center; gap:8px;">' +
+                '<span style="background:#f1f5f9; color:#334155; font-size:0.68rem; font-weight:800; padding:2px 7px; border-radius:5px; white-space:nowrap;">' + escapeHTML(c.certificateType) + '</span>' +
+                '<div style="flex:1; min-width:0;">' +
+                '<div style="font-size:0.75rem; color:#334155; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">' + escapeHTML(c.landlordName || '') + '</div>' +
+                '<div style="font-size:0.7rem; color:' + statusColor + '; font-weight:700;">' + formatDateUK(c.expiryDate) + (daysLabel ? ' · ' + daysLabel : '') + '</div>' +
+                '</div>' +
+                '<button onclick="editCertificate(' + idx + '); document.getElementById(\'addressMatchPanel\').style.display=\'none\';" ' +
+                'style="flex-shrink:0; padding:4px 10px; background:#6366f1; color:white; border:none; border-radius:6px; font-size:0.7rem; font-weight:700; cursor:pointer;">Renew →</button>' +
+                '</div>';
+        });
+        html += '<div style="font-size:0.68rem; color:#94a3b8; padding-top:6px;">' + matches.length + ' existing cert' + (matches.length !== 1 ? 's' : '') + ' found</div>';
         list.innerHTML = html;
     }
     // ============================================================
@@ -5764,6 +5861,7 @@ using ((auth.jwt() ->> 'email') = 'gbmandeep@hotmail.com');</pre>
     var _pcDebounce = null;
     var _pcValid = false;
     var _lastPostTown = '', _lastPostCounty = '', _lastValidPostcode = '';
+    var _geminiApiKey = localStorage.getItem('deepcerts_gemini_key') || '';
 
     function selectRoad(road) {
         var addrEl = document.getElementById('propertyAddress');
@@ -5797,12 +5895,11 @@ using ((auth.jwt() ->> 'email') = 'gbmandeep@hotmail.com');</pre>
                 // "Redbridge" / "Barking and Dagenham" which are wrong in a postal address.
                 // We'll use the Nominatim suburb (e.g. "Ilford", "Dagenham") after the search.
                 var postTown = p.post_town ? titleCaseName(p.post_town) : '';
-                // ── County: admin_county covers England outside London (e.g. "Essex", "Kent").
-                // London boroughs have no admin_county so we leave county blank for them.
-                var postCounty = p.admin_county ? titleCaseName(p.admin_county) : '';
-                if (!postCounty && p.region && p.region !== 'London' && p.region !== 'England') {
-                    postCounty = titleCaseName(p.region);
-                }
+                // ── Borough/County: admin_county for non-London (e.g. "Essex", "Kent");
+                // for London postcodes admin_county is empty so use admin_district (e.g. "Redbridge").
+                var postCounty = p.admin_county
+                    ? titleCaseName(p.admin_county)
+                    : (p.admin_district ? titleCaseName(p.admin_district) : '');
 
                 clearTimeout(_zippoDebounceTimer);
                 var current = addrEl ? addrEl.value.trim() : '';
@@ -5833,8 +5930,9 @@ using ((auth.jwt() ->> 'email') = 'gbmandeep@hotmail.com');</pre>
                                        a.residential || a.service || a.unclassified || '';
                             if (road) roadSet.add(titleCaseName(road));
                             // Suburb/neighbourhood as town fallback
-                            var sub = a.suburb || a.city_district || a.quarter || a.neighbourhood ||
-                                      a.town || a.village || '';
+                            var sub = a.suburb || a.neighbourhood || a.town || a.village || '';
+                            // Exclude formal council/borough names — they're not real-world address towns
+                            if (sub && /^(london borough|city of |metropolitan borough|county of )/i.test(sub)) sub = '';
                             if (sub) suburbCounts[sub] = (suburbCounts[sub] || 0) + 1;
                         });
                         roads = Array.from(roadSet).sort();
@@ -5861,10 +5959,37 @@ using ((auth.jwt() ->> 'email') = 'gbmandeep@hotmail.com');</pre>
                                        ra.residential || ra.service || ra.unclassified || '';
                             if (road) roads = [titleCaseName(road)];
                             if (!nomSuburb) {
-                                nomSuburb = titleCaseName(
-                                    ra.suburb || ra.city_district || ra.quarter || ra.town || ra.village || ''
-                                );
+                                var revSub = ra.suburb || ra.neighbourhood || ra.town || ra.village || '';
+                                if (/^(london borough|city of |metropolitan borough|county of )/i.test(revSub)) revSub = '';
+                                nomSuburb = titleCaseName(revSub);
                             }
+                        }
+                    } catch(e) {}
+                }
+
+                // ── Gemini fallback: only when road is still unknown and API key is configured
+                if (roads.length === 0 && _geminiApiKey) {
+                    try {
+                        var gemResp = await fetch(
+                            'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=' + _geminiApiKey,
+                            {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ contents: [{ parts: [{ text:
+                                    'UK postcode ' + p.postcode + ': list ALL road names in this postcode, plus the postal town and borough/county. ' +
+                                    'Reply ONLY with valid JSON, no markdown: {"roads":["Road Name"],"town":"Town","borough":"Borough"}. ' +
+                                    'Use empty string if unknown. Borough should be just the name, e.g. "Redbridge" not "London Borough of Redbridge".'
+                                }] }] })
+                            }
+                        );
+                        if (gemResp.ok) {
+                            var gemData = await gemResp.json();
+                            var gemText = (gemData.candidates?.[0]?.content?.parts?.[0]?.text || '').replace(/```json?\n?|```/g, '').trim();
+                            var gemJson = JSON.parse(gemText);
+                            if (Array.isArray(gemJson.roads) && gemJson.roads.length > 0)
+                                roads = gemJson.roads.map(function(r){ return titleCaseName(r); });
+                            if (!nomSuburb && gemJson.town)    nomSuburb  = titleCaseName(gemJson.town);
+                            if (!postCounty && gemJson.borough) postCounty = titleCaseName(gemJson.borough);
                         }
                     } catch(e) {}
                 }
@@ -5874,7 +5999,9 @@ using ((auth.jwt() ->> 'email') = 'gbmandeep@hotmail.com');</pre>
                 if (!postTown && p.admin_district) postTown = titleCaseName(p.admin_district);
 
                 // Cache for selectRoad()
-                _lastPostTown = postTown; _lastPostCounty = postCounty; _lastValidPostcode = p.postcode;
+                // Dedup: don't show borough/county if it matches town (e.g. Chelmsford/Chelmsford)
+                var displayCounty = (postCounty && postCounty.toLowerCase() !== postTown.toLowerCase()) ? postCounty : '';
+                _lastPostTown = postTown; _lastPostCounty = displayCounty; _lastValidPostcode = p.postcode;
 
                 // Fill the Town / County helper fields
                 var townEl   = document.getElementById('zippoTown');
@@ -5909,13 +6036,14 @@ using ((auth.jwt() ->> 'email') = 'gbmandeep@hotmail.com');</pre>
                 if (addrEl && isEmpty) {
                     var parts = [];
                     if (roads.length > 0) parts.push(roads[0]);
-                    if (postTown)   parts.push(postTown);
-                    if (postCounty) parts.push(postCounty);
+                    if (postTown)      parts.push(postTown);
+                    if (displayCounty) parts.push(displayCounty);
                     parts.push(p.postcode);
                     addrEl.value = parts.join(', ');
                     addrEl.focus();
                     addrEl.setSelectionRange(0, 0);
                 }
+                updateAddressMatchPanel();
 
                 var hintText = roads.length > 1
                     ? '<i class="fas fa-list-ul"></i> ' + roads.length + ' roads found — pick from dropdown above, then type house number at the start'
@@ -5928,7 +6056,7 @@ using ((auth.jwt() ->> 'email') = 'gbmandeep@hotmail.com');</pre>
                     '<strong style="color:#10b981;">' + p.postcode + '</strong>' +
                     (roads.length > 0 ? ' — ' + escapeHTML(roads[0]) : '') +
                     (postTown         ? ', '   + escapeHTML(postTown) : '') +
-                    (postCounty       ? ', '   + escapeHTML(postCounty) : '') +
+                    (displayCounty    ? ', '   + escapeHTML(displayCounty) : '') +
                     ' &nbsp;·&nbsp; <span style="color:#6366f1;font-weight:600;">' + hintText + '</span>';
             } else {
                 _pcValid = false;
@@ -7750,6 +7878,99 @@ using ((auth.jwt() ->> 'email') = 'gbmandeep@hotmail.com');</pre>
         return getReminderThresholds()[type] || 60;
     }
 
+    var _appSettingsTableExists = null; // null=unknown, true/false after first check
+
+    async function loadAppSettings() {
+        if (!isCloud || !cloudDB) return;
+        try {
+            const { data, error } = await cloudDB.from('app_settings').select('key,value');
+            if (error) {
+                // Table probably doesn't exist yet — silently stay with localStorage
+                _appSettingsTableExists = false;
+                return;
+            }
+            _appSettingsTableExists = true;
+            if (!data) return;
+            data.forEach(function(row) {
+                if (row.key === 'gemini_api_key' && row.value) {
+                    _geminiApiKey = row.value;
+                    localStorage.setItem('deepcerts_gemini_key', row.value);
+                }
+            });
+        } catch(e) { _appSettingsTableExists = false; }
+    }
+
+    async function saveAppSetting(key, value) {
+        // Always persist locally as fallback
+        if (value) localStorage.setItem('deepcerts_' + key, value);
+        else        localStorage.removeItem('deepcerts_' + key);
+
+        if (!isCloud || !cloudDB) return;
+        if (_appSettingsTableExists === false) return; // table not created yet
+
+        try {
+            const { error } = await cloudDB.from('app_settings').upsert(
+                { key: key, value: value || null, updated_at: new Date().toISOString() },
+                { onConflict: 'key' }
+            );
+            if (error && error.message && error.message.includes('does not exist')) {
+                _appSettingsTableExists = false;
+            } else {
+                _appSettingsTableExists = true;
+            }
+        } catch(e) {}
+    }
+
+    function initGeminiSettingsUI() {
+        var input  = document.getElementById('geminiApiKeyInput');
+        var badge  = document.getElementById('geminiStatusBadge');
+        if (!input || !badge) return;
+        var saved = localStorage.getItem('deepcerts_gemini_key') || '';
+        input.value = saved ? '●'.repeat(20) : '';
+        if (saved) {
+            badge.innerText = '✓ Configured'; badge.style.color = '#16a34a'; badge.style.background = '#f0fdf4';
+        } else {
+            badge.innerText = 'Not configured'; badge.style.color = '#94a3b8'; badge.style.background = '#f1f5f9';
+        }
+    }
+    function saveGeminiKey(clear) {
+        var input = document.getElementById('geminiApiKeyInput');
+        var badge = document.getElementById('geminiStatusBadge');
+        if (clear) {
+            _geminiApiKey = '';
+            await saveAppSetting('gemini_api_key', '');
+            if (input) input.value = '';
+            if (badge) { badge.innerText = 'Not configured'; badge.style.color = '#94a3b8'; badge.style.background = '#f1f5f9'; }
+            showToast('Gemini key cleared.', 'info');
+            return;
+        }
+        var rawKey = (input ? input.value.trim() : '').replace(/●/g, '');
+        if (!rawKey) { saveGeminiKey(true); return; }
+        _geminiApiKey = rawKey;
+        await saveAppSetting('gemini_api_key', rawKey);
+        if (badge) { badge.innerText = '✓ Saved to cloud'; badge.style.color = '#16a34a'; badge.style.background = '#f0fdf4'; }
+        if (input) input.value = '●'.repeat(20);
+        showToast('Gemini API key saved to cloud ☁️', 'success');
+    }
+    async function testGeminiKey() {
+        var rawKey = _geminiApiKey || (document.getElementById('geminiApiKeyInput') || {}).value;
+        rawKey = (rawKey || '').replace(/●/g, '').trim();
+        if (!rawKey) { showToast('Enter and save a key first.', 'error'); return; }
+        showToast('Testing Gemini with IG1 1JP…', 'info');
+        try {
+            var r = await fetch(
+                'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=' + rawKey,
+                { method:'POST', headers:{'Content-Type':'application/json'},
+                  body: JSON.stringify({ contents:[{ parts:[{ text:'UK postcode IG1 1JP: reply ONLY with JSON {"roads":["Road Name"],"town":"Town","borough":"Borough"}' }] }] }) }
+            );
+            if (!r.ok) { showToast('Key rejected by Google (HTTP ' + r.status + ').', 'error'); return; }
+            var d = await r.json();
+            var txt = d.candidates?.[0]?.content?.parts?.[0]?.text || '';
+            showToast('Gemini OK: ' + txt.slice(0,80), 'success');
+        } catch(e) {
+            showToast('Test failed: ' + e.message, 'error');
+        }
+    }
     function renderThresholdRows() {
         const el = document.getElementById('thresholdRows');
         if (!el) return;
@@ -7833,6 +8054,56 @@ using ((auth.jwt() ->> 'email') = 'gbmandeep@hotmail.com');</pre>
         showToast('Labels reset to defaults');
     }
 
+    function renderRecentEntries() {
+        const el = document.getElementById('recentEntriesList'); if (!el) return;
+        const LEGACY = 'LEGACY_PRE_2026';
+        const today    = new Date(); today.setHours(0,0,0,0);
+        const yesterday = new Date(today); yesterday.setDate(today.getDate()-1);
+        const weekAgo   = new Date(today); weekAgo.setDate(today.getDate()-7);
+
+        // Sort by entryDate descending, take last 20 with a real date
+        const sorted = certificates
+            .filter(c => c.entryDate && c.entryDate !== LEGACY)
+            .sort((a,b) => new Date(b.entryDate) - new Date(a.entryDate))
+            .slice(0, 20);
+
+        if (sorted.length === 0) {
+            el.innerHTML = '<p style="color:#94a3b8; font-size:0.82rem; text-align:center; padding:16px 0;">No entries with a recorded date yet.</p>';
+            return;
+        }
+
+        let html = ''; let lastGroup = '';
+        sorted.forEach(function(c) {
+            const d = new Date(c.entryDate); d.setHours(0,0,0,0);
+            let group;
+            if (d >= today)          group = 'Today';
+            else if (d >= yesterday) group = 'Yesterday';
+            else if (d >= weekAgo)   group = 'This Week';
+            else                     group = d.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'});
+
+            if (group !== lastGroup) {
+                html += `<div style="font-size:0.7rem; font-weight:800; color:#64748b; letter-spacing:0.07em; text-transform:uppercase; padding:${lastGroup?'12px':'0'} 0 6px;">${group}</div>`;
+                lastGroup = group;
+            }
+            const idx = certificates.indexOf(c);
+            const st  = c._status || calculateStatus(c.expiryDate, c.notResponding);
+            const timeStr = new Date(c.entryDate).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});
+            const typeColors = { EICR:'#2563eb', 'D.EIC':'#7c3aed', GAS:'#059669', FIRE:'#dc2626', EMERG:'#b45309', PAT:'#0891b2', FRA:'#c026d3', EPC:'#16a34a' };
+            const tc = typeColors[c.certificateType] || '#64748b';
+            html += `<div style="display:flex; align-items:center; gap:10px; padding:8px 0; border-bottom:1px solid #f8fafc;">` +
+                `<span style="background:${tc}18; color:${tc}; font-size:0.67rem; font-weight:800; padding:3px 8px; border-radius:5px; white-space:nowrap; min-width:42px; text-align:center;">${escapeHTML(c.certificateType)}</span>` +
+                `<div style="flex:1; min-width:0;">` +
+                `<div style="font-size:0.8rem; font-weight:700; color:#0f172a; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escapeHTML(c.propertyAddress)}</div>` +
+                `<div style="font-size:0.7rem; color:#64748b;">${escapeHTML(c.landlordName||'—')} &nbsp;·&nbsp; Exp: ${formatDateUK(c.expiryDate)}</div>` +
+                `</div>` +
+                `<div style="display:flex; align-items:center; gap:8px; flex-shrink:0;">` +
+                `<span style="font-size:0.67rem; color:#94a3b8;">${timeStr}</span>` +
+                `<span class="pill ${st.class}" style="font-size:0.65rem; padding:2px 7px;">${st.label}</span>` +
+                `<i class="fas fa-edit action-icon" style="font-size:0.8rem;" title="Edit" onclick="editRecord(${idx})"></i>` +
+                `</div></div>`;
+        });
+        el.innerHTML = html;
+    }
     function renderDashboard() {
         const list = certificates; const now = new Date();
         const nm = new Date(now.getFullYear(), now.getMonth() + 1, 1);
@@ -7872,6 +8143,7 @@ using ((auth.jwt() ->> 'email') = 'gbmandeep@hotmail.com');</pre>
 
         // Render urgent banner
         renderUrgentBanner();
+        renderRecentEntries();
 
         // Type cards — single pass per type (fast with cached _status)
         const container = document.getElementById('typeCards'); container.innerHTML = '';
@@ -7913,10 +8185,13 @@ using ((auth.jwt() ->> 'email') = 'gbmandeep@hotmail.com');</pre>
             } else {
                 daysDisplay = `<span class="days-badge days-ok">${diffDays}d left</span>`;
             }
-            const reminderDisplay = c.reminderSentAt 
+            const reminderDisplay = c.reminderSentAt
                 ? `<span class="reminder-sent-badge"><i class="fas fa-check"></i>${new Date(c.reminderSentAt).toLocaleDateString('en-GB',{day:'2-digit',month:'short'})}</span>`
                 : '<span style="color:#cbd5e1;font-size:0.75rem;">—</span>';
-            tr.innerHTML = `<td><input type="checkbox" class="row-check" value="${globalIdx}"></td><td>${escapeHTML(c.certificateNumber)}</td><td class="col-address"><strong>${escapeHTML(c.propertyAddress)}</strong></td><td>${escapeHTML(c.certificateType)}</td><td>${expiryDisplay}</td><td>${daysDisplay}</td><td><span class="pill ${status.class}">${status.label}</span></td><td>${escapeHTML(c.landlordName) || '-'}</td><td><a class="contact-link" href="#" onclick="sendIndividualReminderAndTrack(${globalIdx}, 'whatsapp'); return false;">${escapeHTML(c.phoneNumber) || '-'}</a></td><td>${escapeHTML(c.agentDetails) || '-'}</td><td class="col-comments">${escapeHTML(c.comments) || ''}</td><td style="white-space:nowrap;">${reminderDisplay}</td><td style="white-space:nowrap;"><i class="fas fa-envelope action-icon" title="Send reminder" onclick="sendIndividualReminderAndTrack(${globalIdx}, 'email')"></i><i class="fas fa-edit action-icon" title="Full edit" onclick="editRecord(${globalIdx})"></i><i class="fas fa-pencil-alt action-icon" title="Quick edit" onclick="openInlineEdit(${globalIdx}, this)" style="font-size:0.85rem;"></i></td>`;
+            const entryLabel = (c.entryDate && c.entryDate !== 'LEGACY_PRE_2026')
+                ? `<br><span style="font-size:0.67rem;color:#94a3b8;font-weight:500;"><i class="fas fa-calendar-plus" style="margin-right:3px;opacity:0.6;"></i>${formatDateUK(c.entryDate.slice(0,10))}</span>`
+                : '';
+            tr.innerHTML = `<td><input type="checkbox" class="row-check" value="${globalIdx}"></td><td>${escapeHTML(c.certificateNumber)}</td><td class="col-address"><strong>${escapeHTML(c.propertyAddress)}</strong>${entryLabel}</td><td>${escapeHTML(c.certificateType)}</td><td>${expiryDisplay}</td><td>${daysDisplay}</td><td><span class="pill ${status.class}">${status.label}</span></td><td>${escapeHTML(c.landlordName) || '-'}</td><td><a class="contact-link" href="#" onclick="sendIndividualReminderAndTrack(${globalIdx}, 'whatsapp'); return false;">${escapeHTML(c.phoneNumber) || '-'}</a></td><td>${escapeHTML(c.agentDetails) || '-'}</td><td class="col-comments">${escapeHTML(c.comments) || ''}</td><td style="white-space:nowrap;">${reminderDisplay}</td><td style="white-space:nowrap;"><i class="fas fa-envelope action-icon" title="Send reminder" onclick="sendIndividualReminderAndTrack(${globalIdx}, 'email')"></i><i class="fas fa-edit action-icon" title="Full edit" onclick="editRecord(${globalIdx})"></i><i class="fas fa-pencil-alt action-icon" title="Quick edit" onclick="openInlineEdit(${globalIdx}, this)" style="font-size:0.85rem;"></i></td>`;
             fragment.appendChild(tr);
         });
         tbody.appendChild(fragment);
@@ -7958,6 +8233,16 @@ using ((auth.jwt() ->> 'email') = 'gbmandeep@hotmail.com');</pre>
         }).sort((a, b) => {
             if (sortOrder === 'expiry-asc') return new Date(a.expiryDate) - new Date(b.expiryDate);
             if (sortOrder === 'expiry-desc') return new Date(b.expiryDate) - new Date(a.expiryDate);
+            if (sortOrder === 'added-newest') {
+                const da = (a.entryDate && a.entryDate !== 'LEGACY_PRE_2026') ? new Date(a.entryDate) : new Date(0);
+                const db = (b.entryDate && b.entryDate !== 'LEGACY_PRE_2026') ? new Date(b.entryDate) : new Date(0);
+                return db - da;
+            }
+            if (sortOrder === 'added-oldest') {
+                const da = (a.entryDate && a.entryDate !== 'LEGACY_PRE_2026') ? new Date(a.entryDate) : new Date(0);
+                const db = (b.entryDate && b.entryDate !== 'LEGACY_PRE_2026') ? new Date(b.entryDate) : new Date(0);
+                return da - db;
+            }
             return (a.propertyAddress || '').localeCompare(b.propertyAddress || '');
         });
     }

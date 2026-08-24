@@ -5971,10 +5971,10 @@ using ((auth.jwt() ->> 'email') = 'gbmandeep@hotmail.com');</pre>
                 if (roads.length === 0 && _geminiApiKey) {
                     try {
                         var gemResp = await fetch(
-                            'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=' + _geminiApiKey,
+                            'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent',
                             {
                                 method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
+                                headers: { 'Content-Type': 'application/json', 'x-goog-api-key': _geminiApiKey },
                                 body: JSON.stringify({ contents: [{ parts: [{ text:
                                     'UK postcode ' + p.postcode + ': list ALL road names in this postcode, plus the postal town and borough/county. ' +
                                     'Reply ONLY with valid JSON, no markdown: {"roads":["Road Name"],"town":"Town","borough":"Borough"}. ' +
@@ -7967,8 +7967,8 @@ using ((auth.jwt() ->> 'email') = 'gbmandeep@hotmail.com');</pre>
         showToast('Testing Gemini with IG1 1JP…', 'info');
         try {
             var r = await fetch(
-                'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=' + rawKey,
-                { method:'POST', headers:{'Content-Type':'application/json'},
+                'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent',
+                { method:'POST', headers:{'Content-Type':'application/json','x-goog-api-key':rawKey},
                   body: JSON.stringify({ contents:[{ parts:[{ text:'UK postcode IG1 1JP: reply ONLY with JSON {"roads":["Road Name"],"town":"Town","borough":"Borough"}' }] }] }) }
             );
             if (!r.ok) { showToast('Key rejected by Google (HTTP ' + r.status + ').', 'error'); return; }

@@ -141,7 +141,7 @@
         if (checkIcon) checkIcon.style.display = 'none';
         if (warnIcon) warnIcon.style.display = 'none';
         if (val.length < 2) {
-            document.getElementById('zippoFields').style.display = 'none';
+            var _zf = document.getElementById('zippoFields'); if (_zf) _zf.style.display = 'none';
             if (status) status.innerHTML = '<i class="fas fa-info-circle"></i> Enter postcode first, then type the street address. Both will be combined on save.';
             return;
         }
@@ -151,7 +151,7 @@
             if (el) el.classList.add('pc-loading');
             if (spinnerWrap) spinnerWrap.classList.add('show');
             if (spinner) spinner.style.display = 'block';
-            document.getElementById('zippoFields').style.display = 'grid';
+            var _zfg = document.getElementById('zippoFields'); if (_zfg) _zfg.style.display = 'grid';
             _pcDebounce = setTimeout(function() { validatePostcode(val); }, 300);
             _zippoDebounceTimer = setTimeout(function() { fetchAndFillZippopotam(val); }, 400);
         } else {
@@ -196,7 +196,7 @@
         var countyEl = document.getElementById('zippoCounty');
         if (townEl) { townEl.value = ''; townEl.classList.remove('filled-auto'); }
         if (countyEl) { countyEl.value = ''; countyEl.classList.remove('filled-auto'); }
-        document.getElementById('zippoFields').style.display = 'none';
+        var _zfr = document.getElementById('zippoFields'); if (_zfr) _zfr.style.display = 'none';
         var roadSel = document.getElementById('roadSelector');
         if (roadSel) { roadSel.style.display = 'none'; roadSel.innerHTML = ''; }
         _lastPostTown = ''; _lastPostCounty = ''; _lastValidPostcode = '';
@@ -1749,17 +1749,7 @@
                             <i class="fas fa-info-circle"></i> Enter a UK postcode on the right — road, town and county auto-fill. Then type the door/flat number at the very start.
                         </div>
 
-                        <!-- ZIPPOPOTAM: Town/City + County/State auto-filled fields -->
-                        <div class="zippo-grid" id="zippoFields" style="display:none;">
-                            <div class="zippo-field-wrap">
-                                <label><i class="fas fa-city" style="margin-right:4px;color:#94a3b8;"></i>Town / City</label>
-                                <input type="text" id="zippoTown" class="zippo-input" placeholder="Auto-filled from postcode..." autocomplete="off">
-                            </div>
-                            <div class="zippo-field-wrap">
-                                <label><i class="fas fa-map" style="margin-right:4px;color:#94a3b8;"></i>County / State</label>
-                                <input type="text" id="zippoCounty" class="zippo-input" placeholder="Auto-filled from postcode..." autocomplete="off">
-                            </div>
-                        </div>
+                        <!-- Town/County fields removed — address bar carries full address -->
                     </div>
                     <div class="input-group"><label>Expiry Date</label><input type="date" id="expiryDate" style="width:100%; padding:12px;"></div>
                 </div>
